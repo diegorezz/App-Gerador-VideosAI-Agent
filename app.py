@@ -34,7 +34,7 @@ st.set_page_config(
 # ==============================================================================
 DESIGN_SYSTEM_CSS = """
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@500;600&family=Inter:wght@400;500;600&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@500;600&family=Inter:wght@400;500;600&family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@24,400,0,0&display=swap');
 
 :root {
     --bg-candle-dark: #160B06;
@@ -51,7 +51,6 @@ DESIGN_SYSTEM_CSS = """
 .stApp {
     background: radial-gradient(circle at 50% 10%, #2A140A 0%, #160B06 60%, #0E0603 100%) !important;
     color: var(--parchment-light) !important;
-    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif !important;
 }
 
 /* Barra Lateral */
@@ -60,7 +59,7 @@ section[data-testid="stSidebar"] {
     border-right: 1px solid #4A2E18 !important;
 }
 
-/* Títulos com Cinzel suave (sem exagero e sem sombra pesada) */
+/* Títulos com Cinzel suave */
 h1, h2, h3 {
     font-family: 'Cinzel', Georgia, serif !important;
     color: var(--parchment-light) !important;
@@ -68,15 +67,122 @@ h1, h2, h3 {
     font-weight: 600 !important;
 }
 
-/* Textos corridos, labels, inputs e alertas com fonte Inter super limpa e legível */
-p, label, span, div, .stMarkdown, .stCaption, li {
+/* Textos corridos e labels com Inter — SEM afetar spans de ícones */
+p, label, li, input, textarea {
     font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif !important;
 }
 
 p, label {
-    font-size: 0.96rem !important;
+    font-size: 0.95rem !important;
     line-height: 1.55 !important;
     color: var(--parchment-mid) !important;
+}
+
+/* CORREÇÃO 1: Força a fonte oficial de ícones Material Symbols em todos os ícones do Streamlit (evita 'keyboard_double' e 'uploadUpload') */
+span[data-testid="stIconMaterial"],
+.material-symbols-rounded,
+[data-testid="stSidebarCollapseButton"] span,
+[data-testid="collapsedControl"] span,
+button[kind="header"] span,
+button[kind="headerNoPadding"] span {
+    font-family: 'Material Symbols Rounded' !important;
+    font-weight: normal !important;
+    font-style: normal !important;
+    font-size: 22px !important;
+    line-height: 1 !important;
+    letter-spacing: normal !important;
+    text-transform: none !important;
+    display: inline-block !important;
+    white-space: nowrap !important;
+    word-wrap: normal !important;
+    direction: ltr !important;
+    -webkit-font-feature-settings: 'liga' !important;
+    font-feature-settings: 'liga' !important;
+    -webkit-font-smoothing: antialiased !important;
+    max-width: 26px !important;
+    overflow: hidden !important;
+}
+
+/* Oculta o ícone duplicado dentro do botão de Upload para nunca sobrepor 'uploadUpload' */
+section[data-testid="stFileUploaderDropzone"] button span[data-testid="stIconMaterial"] {
+    display: none !important;
+}
+
+/* CORREÇÃO 2: Remove o texto 'Press Ctrl+Enter to apply' que sobrepunha o texto digitado na caixa de diretriz */
+div[data-testid="InputInstructions"] {
+    display: none !important;
+    visibility: hidden !important;
+}
+
+/* Dá espaçamento interno confortável na caixa de texto para não colar na barra de rolagem */
+.stTextArea textarea {
+    padding: 12px 16px 20px 14px !important;
+    line-height: 1.5 !important;
+}
+
+/* CORREÇÃO 3: Estilo do Aviso Minimizável + Ícone '?' Transparente com Tooltip Explicativo */
+.oracle-notice-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    background: rgba(200, 146, 59, 0.08);
+    border: 1px solid rgba(200, 146, 59, 0.28);
+    border-radius: 6px;
+    padding: 8px 14px;
+    margin-bottom: 10px;
+    font-size: 0.88rem;
+    color: var(--parchment-mid);
+}
+
+.oracle-help-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    background: rgba(244, 230, 210, 0.08);
+    border: 1px solid rgba(244, 230, 210, 0.35);
+    color: rgba(244, 230, 210, 0.75);
+    font-size: 0.75rem;
+    font-weight: 600;
+    margin-left: 8px;
+    cursor: help;
+    position: relative;
+    transition: all 0.2s ease;
+}
+
+.oracle-help-badge:hover {
+    background: rgba(200, 146, 59, 0.25);
+    color: #FFF;
+    border-color: var(--candle-gold);
+}
+
+.oracle-help-badge .tooltip-box {
+    visibility: hidden;
+    opacity: 0;
+    width: 310px;
+    background-color: #1A0C06;
+    color: #F4E6D2;
+    text-align: left;
+    border: 1px solid #7A5230;
+    border-radius: 6px;
+    padding: 10px 12px;
+    position: absolute;
+    z-index: 9999;
+    bottom: 135%;
+    right: 0;
+    font-size: 0.8rem;
+    font-weight: 400;
+    line-height: 1.45;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.85);
+    transition: opacity 0.2s ease;
+    pointer-events: none;
+}
+
+.oracle-help-badge:hover .tooltip-box {
+    visibility: visible;
+    opacity: 1;
 }
 
 /* Cabeçalho Editorial Elegante e Compacto */
@@ -835,7 +941,20 @@ with col_dir:
     else:
         plano = st.session_state.plano_ia
         if plano.get("_aviso_chave"):
-            st.warning(plano["_aviso_chave"])
+            st.markdown("""
+            <div class="oracle-notice-bar">
+                <span>🕯️ <strong>Modo Oráculo Interno Ativo</strong> — Funcionamento 100% gratuito habilitado automaticamente.</span>
+                <span class="oracle-help-badge">?
+                    <span class="tooltip-box">
+                        <strong>Por que este aviso aparece?</strong><br>
+                        Fique tranquilo! É assim mesmo que o sistema deve operar quando você usa sem chave paga ou quando uma chave anterior do Google AI Studio expira.<br><br>
+                        O <strong>Oráculo Interno Iniciático</strong> já contém todos os 22 Arcanos mapeados e gera o seu vídeo normalmente sem nenhum custo.
+                    </span>
+                </span>
+            </div>
+            """, unsafe_allow_html=True)
+            with st.expander("ℹ️ Ver detalhes técnicos da chave de API (Opcional — clique para abrir/minimizar)", expanded=False):
+                st.caption(plano["_aviso_chave"])
 
         modelo_usado = plano.get("_modelo_usado", "Oráculo IA")
         st.success(f"✦ **Carta Estruturada ({modelo_usado}):** {plano.get('arcano_nome', 'Arcano Maior')}")
