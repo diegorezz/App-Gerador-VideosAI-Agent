@@ -1386,7 +1386,6 @@ def renderizar_video_cinematografico_multicenas(
     with open(lista_txt, "w", encoding="utf-8") as f:
         for cp in clipes_para_unir:
             f.write(f"file '{cp.resolve()}'\n")
-")
 
     ffmpeg_exe = obter_executavel_ffmpeg()
     cmd_concat = [
