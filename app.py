@@ -44,6 +44,7 @@ Retorne ESTRITAMENTE um JSON válido com a seguinte estrutura:
   "arcano_nome": "Nome e numeral romano do Arcano",
   "simbolo_unicode": "Caractere unicode ou símbolo astrológico (ex: ♈, ♄, ☉, ☽, ✡, ♃)",
   "cor_particula_rgb": [217, 178, 90],
+  "duracao_sugerida_segundos": 20,
   "camadas_z_space": {
     "primeiro_plano": "Elementos na frente da cena",
     "plano_medio": "Figura central / trono / personagem principal",
@@ -79,10 +80,9 @@ def converter_imagem_para_png_bytes(img_pil: Image.Image) -> bytes:
     return buf.getvalue()
 
 # ==============================================================================
-# CONECTOR GOOGLE DRIVE ULTRA-RÁPIDO (EVITA TYPEERROR DO GDOWN E BAIXA SOB DEMANDA)
+# CONECTOR GOOGLE DRIVE ULTRA-RÁPIDO (LISTAGEM INSTANTÂNEA + DOWNLOAD SOB DEMANDA)
 # ==============================================================================
 def extrair_id_drive(url: str) -> tuple[str | None, str]:
-    """Extrai o ID limpo da pasta ou do arquivo do Google Drive, ignorando ?usp=drive_link."""
     url = url.strip()
     m_folder = re.search(r"/folders/([a-zA-Z0-9_-]+)", url)
     if m_folder:
@@ -96,11 +96,6 @@ def extrair_id_drive(url: str) -> tuple[str | None, str]:
     return None, "unknown"
 
 def listar_arquivos_pasta_drive(url: str) -> list[dict]:
-    """
-    Lista instantaneamente os arquivos de uma pasta pública do Drive (via embeddedfolderview)
-    sem travar baixando gigabytes de uma vez e sem quebrar com ?usp=drive_link.
-    Retorna lista de dicts: [{"name": nome, "id": file_id, "local_path": None}]
-    """
     drive_id, tipo = extrair_id_drive(url)
     if not drive_id:
         raise ValueError("Link do Google Drive inválido. Use um link de pasta (/folders/...) ou arquivo (/file/d/...).")
@@ -108,16 +103,14 @@ def listar_arquivos_pasta_drive(url: str) -> list[dict]:
     extensoes_img = (".tif", ".tiff", ".png", ".jpg", ".jpeg", ".webp")
 
     if tipo == "file":
-        return [{"name": f"Carta_Drive_{drive_id[:6]}.tif", "id": drive_id, "local_path": None}]
+        return [{"name": f"Carta_Selecionada.tif", "id": drive_id, "local_path": None}]
 
-    # Método 1: Leitura instantânea via página pública embeddedfolderview do Google Drive
     embed_url = f"https://drive.google.com/embeddedfolderview?id={drive_id}#list"
     headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
     resp = requests.get(embed_url, headers=headers, timeout=20)
 
     itens = []
     if resp.status_code == 200:
-        # Captura blocos de entradas de arquivo na visualização de lista do Drive
         padrao = re.compile(
             r'id="entry-([a-zA-Z0-9_-]+)".*?class="flip-entry-title">([^<]+)</div>',
             re.DOTALL
@@ -131,7 +124,6 @@ def listar_arquivos_pasta_drive(url: str) -> list[dict]:
         itens.sort(key=lambda x: x["name"])
         return itens
 
-    # Método 2 (Fallback): gdown passando id limpo e sem argumentos conflitantes
     pasta_destino = PASTA_TEMP / "drive_sync"
     pasta_destino.mkdir(exist_ok=True)
     arquivos = gdown.download_folder(id=drive_id, output=str(pasta_destino), quiet=True, use_cookies=False)
@@ -143,7 +135,6 @@ def listar_arquivos_pasta_drive(url: str) -> list[dict]:
     return itens
 
 def baixar_carta_individual_drive(item: dict) -> Path:
-    """Baixa apenas a carta selecionada pelo usuário (muito mais rápido e sem erro de limite)."""
     if item.get("local_path") and Path(item["local_path"]).exists():
         return Path(item["local_path"])
 
@@ -155,13 +146,11 @@ def baixar_carta_individual_drive(item: dict) -> Path:
     if destino_arquivo.exists() and destino_arquivo.stat().st_size > 1000:
         return destino_arquivo
 
-    # Download direto via endpoint de exportação/uc do Google Drive
     url_dl = f"https://drive.google.com/uc?id={f_id}&export=download"
     caminho = gdown.download(url=url_dl, output=str(destino_arquivo), quiet=True, fuzzy=True)
     if caminho and os.path.exists(caminho):
         return Path(caminho)
 
-    # Fallback via requests direto
     r = requests.get(url_dl, stream=True, timeout=30)
     if r.status_code == 200:
         with open(destino_arquivo, "wb") as f:
@@ -172,22 +161,66 @@ def baixar_carta_individual_drive(item: dict) -> Path:
 
     raise RuntimeError("Não foi possível baixar esta carta. Verifique se a pasta do Drive está pública ('Qualquer pessoa com o link').")
 
+# ==============================================================================
+# SELETOR INTELIGENTE DE MODELOS GEMINI (COM FALLBACK AUTOMÁTICO PARA CHAVES NOVAS)
+# ==============================================================================
 def diagnosticar_carta_ia(api_key: str, img_bytes: bytes, instrucao_usuario: str) -> dict:
-    """Usa o Gemini 2.5 Flash (100% GRATUITO no Google AI Studio) para planejar o vídeo."""
+    """
+    Usa o modelo mais recente disponível para a chave do usuário (ex: gemini-3.0-flash,
+    gemini-3-flash-preview, gemini-flash-latest) com fallback automático caso algum modelo
+    seja descontinuado para novas contas.
+    """
     client = genai.Client(api_key=api_key)
-    response = client.models.generate_content(
-        model="gemini-2.5-flash",
-        contents=[
-            types.Part.from_bytes(data=img_bytes, mime_type="image/png"),
-            f"Solicitação do usuário: {instrucao_usuario}"
-        ],
-        config=types.GenerateContentConfig(
-            system_instruction=SYSTEM_PROMPT,
-            response_mime_type="application/json",
-            temperature=0.2,
-        ),
-    )
-    return json.loads(response.text)
+
+    # Lista de prioridade de modelos gratuitos atuais + descoberta automática via client.models.list()
+    modelos_candidatos = [
+        "gemini-3.0-flash",
+        "gemini-3-flash-preview",
+        "gemini-flash-latest",
+        "gemini-2.5-flash-lite",
+        "gemini-2.5-flash",
+    ]
+
+    try:
+        for m in client.models.list():
+            nome_m = getattr(m, "name", "").replace("models/", "")
+            if "gemini" in nome_m and "flash" in nome_m and "vision" not in nome_m and "tts" not in nome_m:
+                if nome_m not in modelos_candidatos:
+                    modelos_candidatos.insert(1, nome_m)
+    except Exception:
+        pass
+
+    ultimo_erro = None
+    for modelo in modelos_candidatos:
+        try:
+            response = client.models.generate_content(
+                model=modelo,
+                contents=[
+                    types.Part.from_bytes(data=img_bytes, mime_type="image/png"),
+                    f"Solicitação do usuário: {instrucao_usuario}"
+                ],
+                config=types.GenerateContentConfig(
+                    system_instruction=SYSTEM_PROMPT,
+                    response_mime_type="application/json",
+                    temperature=0.2,
+                ),
+            )
+            dados = json.loads(response.text)
+            dados["_modelo_usado"] = modelo
+            return dados
+        except Exception as e:
+            ultimo_erro = e
+            continue
+
+    raise RuntimeError(f"Não foi possível conectar aos modelos Gemini desta chave. Detalhe: {ultimo_erro}")
+
+def extrair_duracao_segundos(texto_usuario: str, padrao: int = 16) -> int:
+    """Detecta se o usuário pediu ex: '20s', '20 segundos' no texto e ajusta a duração automaticamente."""
+    m = re.search(r"(\d{1,2})\s*(?:s|seg|segundos)", texto_usuario.lower())
+    if m:
+        val = int(m.group(1))
+        return max(6, min(40, val))
+    return padrao
 
 # ==============================================================================
 # MOTOR 1 (100% GRATUITO E NATIVO): RENDERIZADOR 2.5D PARALLAX & CUTOUT ENGINE
@@ -244,7 +277,7 @@ def renderizar_video_nativo_gratuito(
     saida_raw: Path,
     barra_progresso,
     texto_status,
-    duracao_s: int = 8,
+    duracao_s: int = 10,
     fps: int = 24
 ) -> bool:
     W, H = 720, 1280
@@ -464,12 +497,12 @@ with st.sidebar:
     st.divider()
     st.subheader("🛠️ Status do Sistema")
     if nova_chave:
-        st.success("✅ Motor de IA Conectado (Gemini Free Tier)")
+        st.success("✅ Motor de IA Conectado (Gemini 3.0 Flash)")
     else:
         st.warning("⚠️ Insira sua Chave Gratuita acima")
 
     if verificar_ffmpeg():
-        st.success("✅ FFmpeg Ativo (Loop 16s + Áudio Habilitados)")
+        st.success("✅ FFmpeg Ativo (Loop + Áudio Habilitados)")
     else:
         st.warning("⚠️ FFmpeg não detectado")
 
@@ -481,6 +514,8 @@ if "nome_arquivo" not in st.session_state:
     st.session_state.nome_arquivo = "carta_tarot"
 if "arquivos_drive" not in st.session_state:
     st.session_state.arquivos_drive = []
+if "duracao_total" not in st.session_state:
+    st.session_state.duracao_total = 20
 
 col_esq, col_dir = st.columns([1, 1.2], gap="large")
 
@@ -533,7 +568,7 @@ with col_esq:
 
     ideia_custom = st.text_area(
         "💬 Descreva o que deseja no vídeo (ou deixe em branco para usar o efeito padrão do vídeo referência):",
-        placeholder="Ex: Quero construir um vídeo como o modelo referência (efeito cutout 2.5D, órbita 360° e símbolo astrológico no céu) com o tema desta carta.",
+        placeholder="Ex: Quero um vídeo de 20s, no estilo do vídeo referência.",
         height=90
     )
 
@@ -543,9 +578,10 @@ with col_esq:
         elif not st.session_state.img_bytes:
             st.error("⚠️ Envie uma imagem ou selecione uma carta do Google Drive primeiro.")
         else:
-            with st.spinner("🤖 O Agente (Gemini Flash Gratuito) está inspecionando a carta e separando as camadas..."):
+            with st.spinner("🤖 O Agente (Gemini 3.0 Flash Gratuito) está inspecionando a carta e separando as camadas..."):
                 try:
-                    pedido = ideia_custom.strip() or "Construir vídeo 2.5D cutout parallax idêntico à referência, com órbita 360 e símbolo cósmico no céu."
+                    pedido = ideia_custom.strip() or "Construir vídeo de 16s 2.5D cutout parallax idêntico à referência, com órbita 360 e símbolo cósmico no céu."
+                    st.session_state.duracao_total = extrair_duracao_segundos(pedido, padrao=16)
                     st.session_state.plano_ia = diagnosticar_carta_ia(nova_chave, st.session_state.img_bytes, pedido)
                 except Exception as e:
                     st.error(f"Erro ao analisar carta: {e}")
@@ -557,7 +593,8 @@ with col_dir:
         st.info("👈 Carregue uma carta ao lado e clique em **Analisar Carta** para o Agente montar a estrutura 3D interativa aqui.")
     else:
         plano = st.session_state.plano_ia
-        st.success(f"✨ **Carta Identificada pelo Agente:** {plano.get('arcano_nome', 'Arcano do Tarô')}")
+        modelo_usado = plano.get("_modelo_usado", "gemini-3.0-flash")
+        st.success(f"✨ **Carta Identificada pelo Agente ({modelo_usado}):** {plano.get('arcano_nome', 'Arcano do Tarô')}")
 
         with st.expander("📐 Camadas de Profundidade 2.5D (Você pode editar se desejar)", expanded=True):
             camadas = plano.get("camadas_z_space", {})
@@ -568,7 +605,8 @@ with col_dir:
             astro = st.text_input("🌌 Revelação Cósmica no Céu (Tilt-up):", value=plano.get("astro_revelacao_ceu", ""))
             simbolo_uni = st.text_input("✡️ Símbolo Esotérico / Astrológico no Céu:", value=plano.get("simbolo_unicode", "✦"))
 
-        with st.expander("🎵 Trilha Sonora e Loop Infinito (16 segundos)", expanded=True):
+        with st.expander("⏱️ Duração, Trilha Sonora e Loop Infinito", expanded=True):
+            duracao_escolhida = st.slider("Duração total do vídeo final (segundos):", min_value=8, max_value=30, value=int(st.session_state.duracao_total), step=2)
             audio_upload = st.file_uploader("Adicionar música de fundo (.mp3 / .wav):", type=["mp3", "wav", "m4a"])
             aplicar_loop_reverso = st.checkbox("Criar Loop Infinito Perfeito (Vai até o céu e retorna suavemente para a carta 2D)", value=True)
 
@@ -598,23 +636,27 @@ with col_dir:
                 caminho_audio_temp.write_bytes(audio_upload.getvalue())
 
             try:
+                # Se o loop reverso estiver ativo, renderiza metade da duração na ida e dobra na volta (ex: 10s ida + 10s volta = 20s exatos!)
+                duracao_ida = max(4, duracao_escolhida // 2) if aplicar_loop_reverso else duracao_escolhida
+
                 if "100% Gratuito" in motor_escolhido:
                     ok = renderizar_video_nativo_gratuito(
                         st.session_state.img_bytes,
                         plano,
                         raw_mp4,
                         barra,
-                        status_txt
+                        status_txt,
+                        duracao_s=duracao_ida
                     )
                 else:
                     ok = renderizar_video_veo(nova_chave, st.session_state.img_bytes, prompt_tecnico, raw_mp4, barra, status_txt)
 
                 if ok:
                     barra.progress(90)
-                    status_txt.info("🎞️ Finalizando pós-produção, loop reverso de 16s e mixagem de áudio via FFmpeg...")
+                    status_txt.info(f"🎞️ Finalizando pós-produção, loop reverso ({duracao_escolhida}s) e mixagem de áudio via FFmpeg...")
                     pos_producao_loop_e_audio(raw_mp4, caminho_audio_temp, final_mp4, aplicar_loop_reverso)
                     barra.progress(100)
-                    status_txt.success("✅ Vídeo Pronto! Assista abaixo ou clique no botão para baixar.")
+                    status_txt.success(f"✅ Vídeo Pronto ({duracao_escolhida}s)! Assista abaixo ou clique no botão para baixar.")
 
                     video_bytes = final_mp4.read_bytes()
                     st.video(video_bytes)
