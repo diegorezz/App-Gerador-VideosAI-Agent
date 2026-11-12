@@ -1014,477 +1014,387 @@ def extrair_duracao_segundos(texto_usuario: str, padrao: int = 20) -> int:
     return padrao
 
 # ==============================================================================
-# MOTOR 1 (IA GENERATIVA DE VÍDEO GRATUITA - HUGGING FACE / GRADIO SPACES)
-# Gera vídeo com IA Generativa Real (como o vídeo teste do chat) sem custo!
+# MOTOR CINEMATOGRÁFICO MULTI-CENAS (ESTILO MYSTICMAYHEM.AI — VIDEO_1.MP4)
+# Decompõe o vídeo em 5 atos reais:
+#   Ato 1: Portal de Luz Dourada disparado do centro da carta 2D;
+#   Ato 2: Cena IA Generativa 1 — Órbita 360° ao redor do Arquétipo em hachura/xilogravura viva;
+#   Ato 3: Cena IA Generativa 2 — Exploração do Cenário Terrestre e símbolos da carta em tela cheia;
+#   Ato 4: Cena IA Generativa 3 — Ascensão até o Astro/Planeta/Sol no céu com brilho cósmico;
+#   Ato 5: Vórtice Espiral / Feixe de Luz retornando em loop para a carta 2D original!
 # ==============================================================================
-def renderizar_video_ia_generativa_gratuita(
-    img_bytes: bytes,
-    prompt_en: str,
-    saida_raw: Path,
-    barra_progresso,
-    texto_status,
-    hf_token: str = ""
+def gerar_keyframe_ilustrado_gratuito(prompt_cena: str, seed: int = 42, W: int = 720, H: int = 1280) -> Image.Image | None:
+    """
+    Gera um quadro-chave (Keyframe) ilustrado em 9:16 no exato estilo de gravura/xilogravura
+    colorida com hachuras do Tarô de Marselha / Rider-Waite usando Pollinations.ai (100% Gratuito, sem chave!).
+    """
+    import urllib.parse
+    estilo_base = (
+        "vintage 17th century tarot card woodcut engraving illustration, bold black ink linework, "
+        "detailed crosshatching shading, warm parchment and muted primary colors, full bleed vertical scene, "
+        "no card borders, no text, cinematic lighting, "
+    )
+    prompt_completo = urllib.parse.quote(estilo_base + prompt_cena)
+    url = f"https://image.pollinations.ai/prompt/{prompt_completo}?width={W}&height={H}&seed={seed}&nologo=true&model=flux"
+    try:
+        r = requests.get(url, timeout=35)
+        if r.status_code == 200 and len(r.content) > 5000:
+            return Image.open(io.BytesIO(r.content)).convert("RGB").resize((W, H), Image.Resampling.LANCZOS)
+    except Exception:
+        pass
+    return None
+
+def animar_clipe_ia_cloud(
+    img_pil: Image.Image,
+    prompt_movimento_en: str,
+    saida_clip: Path,
+    hf_token: str = "",
+    fal_key: str = ""
 ) -> bool:
     """
-    Tenta gerar o vídeo em motores de IA Generativa de Vídeo gratuitos na nuvem
-    (LTX-Video / Wan-2.1 / SVD via Gradio Client). Se as filas gratuitas estiverem
-    lotadas no momento, faz fallback automático para o novo Motor Diorama 3D Real!
+    Envia um Keyframe (a carta original ou um keyframe ilustrado de cena) para um motor
+    de IA Generativa Image-to-Video real na nuvem:
+    1) Se o usuário informou chave Fal.ai (que dá créditos gratuitos ao criar conta), usa Wan-2.1 / Kling I2V ultra-rápido;
+    2) Caso contrário, conecta gratuitamente via `gradio_client` nos Spaces públicos do Hugging Face
+       (Wan-AI/Wan2.1, Lightricks/LTX-Video, THUDM/CogVideoX-5b-Space) usando o HF_TOKEN gratuito!
     """
+    temp_in = PASTA_TEMP / f"kf_{saida_clip.stem}.png"
+    img_pil.convert("RGB").save(temp_in, format="PNG")
+
+    # Opção A: Fal.ai API (Caso o usuário tenha inserido uma FAL_KEY)
+    if fal_key and len(fal_key.strip()) > 10:
+        try:
+            import base64
+            b64 = base64.b64encode(temp_in.read_bytes()).decode("utf-8")
+            headers = {"Authorization": f"Key {fal_key.strip()}", "Content-Type": "application/json"}
+            payload = {
+                "prompt": prompt_movimento_en,
+                "image_url": f"data:image/png;base64,{b64}",
+                "aspect_ratio": "9:16"
+            }
+            r = requests.post("https://fal.run/fal-ai/wan-i2v", headers=headers, json=payload, timeout=120)
+            if r.status_code == 200:
+                v_url = r.json().get("video", {}).get("url")
+                if v_url:
+                    vr = requests.get(v_url, timeout=60)
+                    saida_clip.write_bytes(vr.content)
+                    return True
+        except Exception:
+            pass
+
+    # Opção B: Hugging Face Spaces Públicos Gratuitos (Gradio Client)
     try:
         from gradio_client import Client, handle_file
     except ImportError:
         return False
 
-    temp_img = PASTA_TEMP / "input_ia_gen.png"
-    temp_img.write_bytes(img_bytes)
-
-    espacos_ia_gratuitos = [
-        ("Lightricks/LTX-Video", "ltx"),
+    espacos = [
         ("Wan-AI/Wan2.1", "wan"),
+        ("Lightricks/LTX-Video", "ltx"),
+        ("THUDM/CogVideoX-5b-Space", "cog"),
         ("multimodalart/stable-video-diffusion", "svd"),
     ]
 
-    for space_id, tipo in espacos_ia_gratuitos:
-        try:
-            texto_status.info(f"🌐 Conectando ao Motor de Vídeo IA Gratuito ({space_id})...")
-            barra_progresso.progress(20)
-            kwargs = {"hf_token": hf_token.strip()} if hf_token and hf_token.strip() else {}
-            cl = Client(space_id, **kwargs)
-            barra_progresso.progress(40)
-            texto_status.info(f"🎬 Gerando movimento 3D generativo por IA em {space_id}...")
+    kwargs = {"hf_token": hf_token.strip()} if hf_token and hf_token.strip() else {}
 
+    for space_id, tipo in espacos:
+        try:
+            cl = Client(space_id, **kwargs)
             if tipo == "svd":
-                res = cl.predict(handle_file(str(temp_img)), api_name="/video")
+                res = cl.predict(handle_file(str(temp_in)), api_name="/video")
+            elif tipo == "cog":
+                res = cl.predict(
+                    prompt=prompt_movimento_en,
+                    image_input=handle_file(str(temp_in)),
+                    api_name="/generate"
+                )
             else:
                 res = cl.predict(
-                    prompt=prompt_en,
-                    image=handle_file(str(temp_img)),
+                    prompt=prompt_movimento_en,
+                    image=handle_file(str(temp_in)),
                 )
-
-            video_path = res[0] if isinstance(res, (list, tuple)) else res
-            if isinstance(video_path, dict) and "video" in video_path:
-                video_path = video_path["video"]
-            if video_path and os.path.exists(str(video_path)):
-                shutil.copy(str(video_path), str(saida_raw))
-                barra_progresso.progress(85)
-                return True
+            v_path = res[0] if isinstance(res, (list, tuple)) else res
+            if isinstance(v_path, dict) and "video" in v_path:
+                v_path = v_path["video"]
+            if v_path and os.path.exists(str(v_path)):
+                # Padroniza o clipe gerado para 720x1280 24fps sem áudio via FFmpeg
+                ffmpeg_exe = obter_executavel_ffmpeg()
+                cmd = [
+                    ffmpeg_exe, "-y", "-i", str(v_path),
+                    "-vf", "scale=720:1280:force_original_aspect_ratio=increase,crop=720:1280,fps=24",
+                    "-an", "-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p",
+                    str(saida_clip)
+                ]
+                subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                if saida_clip.exists():
+                    return True
         except Exception:
             continue
 
     return False
 
-# ==============================================================================
-# MOTOR 2 (DIORAMA 3D DE SILHUETA RECORTADA & CÂMERA ESPACIAL REAL - 100% GRATUITO)
-# Corrige o problema de "apenas dar zoom/inverter a carta inteira":
-# - Remove o fundo chapado e recorta a SILHUETA REAL do personagem (Paper Cutout)
-# - Cria 6 planos de profundidade em perspectiva 3D (Chão 3D, Pilares Laterais,
-#   Elementos de 1º Plano, Silhueta do Personagem com Borda de Papel, Montanhas e Céu)
-# ==============================================================================
-def extrair_silhueta_personagem_tarot(card_rgba: Image.Image) -> tuple[Image.Image, Image.Image, Image.Image]:
+def criar_transicao_portal_e_vortice_mystic(
+    img_card_pil: Image.Image,
+    tipo_efeito: str = "portal_luz",
+    duracao_s: float = 1.6,
+    fps: int = 24,
+    W: int = 720,
+    H: int = 1280
+) -> Path:
     """
-    Separa de verdade a figura central do fundo da carta (sem recortar um retângulo)!
-    Identifica a cor dominante do fundo da carta (ex: amarelo/bege do Tarô de Marselha),
-    isola o personagem central com contorno de recorte de papel (Paper Mario / MysticMayhem),
-    isola os elementos da base/primeiro plano e cria o cenário limpo ao fundo.
+    Cria os efeitos assinatura do `video_1.mp4` (`mysticmayhem.ai`):
+    - 'portal_luz' (00:01 do vídeo referência): A carta 2D flutua sobre fundo desfocado e dispara um
+      feixe de luz dourada/solar intenso do centro em direção à lente da câmera, abrindo a cena!
+    - 'vortice_espiral' (00:16 e 00:25 do vídeo referência): Um túnel espiral hipnótico em carmesim/ouro
+      puxa a câmera de volta para a carta 2D original!
     """
-    from scipy import ndimage
+    out_path = PASTA_TEMP / f"fx_{tipo_efeito}.mp4"
+    total_f = max(12, int(duracao_s * fps))
+    ffmpeg_exe = obter_executavel_ffmpeg()
 
-    w, h = card_rgba.size
-    arr = np.array(card_rgba)
-    rgb = arr[:, :, :3].astype(np.float32)
+    card_resized = img_card_pil.convert("RGBA").resize((int(W * 0.72), int(H * 0.68)), Image.Resampling.LANCZOS)
+    cw, ch = card_resized.size
+    bg_blur = img_card_pil.convert("RGB").resize((W, H), Image.Resampling.LANCZOS).filter(ImageFilter.GaussianBlur(radius=28))
+    bg_blur = ImageEnhance.Brightness(bg_blur).enhance(0.55)
 
-    # 1. Recorta apenas a área interna da arte (eliminando as bordas pretas/brancas e a caixa do nome embaixo)
-    x0, y0, x1, y1 = int(w * 0.09), int(h * 0.06), int(w * 0.91), int(h * 0.84)
-    inner_mask = np.zeros((h, w), dtype=bool)
-    inner_mask[y0:y1, x0:x1] = True
+    cmd = [
+        ffmpeg_exe, "-y", "-f", "rawvideo", "-vcodec", "rawvideo",
+        "-s", f"{W}x{H}", "-pix_fmt", "rgb24", "-r", str(fps), "-i", "-",
+        "-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p", str(out_path)
+    ]
+    proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
-    # 2. Amostra os cantos superiores internos da carta para descobrir a cor do céu/fundo da carta
-    amostras_bg = np.concatenate([
-        rgb[y0+5:y0+35, x0+5:x0+40].reshape(-1, 3),
-        rgb[y0+5:y0+35, x1-40:x1-5].reshape(-1, 3),
-        rgb[int(h*0.20):int(h*0.30), x0+5:x0+25].reshape(-1, 3),
-        rgb[int(h*0.20):int(h*0.30), x1-25:x1-5].reshape(-1, 3),
-    ], axis=0)
-    cor_fundo = np.median(amostras_bg, axis=0)
+    for i in range(total_f):
+        t = i / max(1, total_f - 1)
+        if tipo_efeito == "portal_luz":
+            ease = t * t
+            zoom = 1.0 + 1.8 * ease
+            frame = bg_blur.copy().convert("RGBA")
+            nw, nh = int(cw * zoom), int(ch * zoom)
+            c_zoom = card_resized.resize((nw, nh), Image.Resampling.BILINEAR)
+            frame.paste(c_zoom, ((W - nw)//2, (H - nh)//2), c_zoom)
 
-    # Distância de cor em relação ao fundo chapado da carta
-    dist_bg = np.linalg.norm(rgb - cor_fundo, axis=2)
+            # Feixe de luz dourada diagonal rasgando da carta até a lente (igual 00:01 do video_1.mp4!)
+            overlay = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+            draw = ImageDraw.Draw(overlay)
+            cx, cy = W // 2, int(H * 0.44)
+            largura_feixe = int(30 + 680 * ease)
+            alpha_feixe = int(min(255, 110 + 145 * t))
+            pts_feixe = [
+                (cx - 15, cy - 15),
+                (cx + 25, cy + 15),
+                (W + largura_feixe, H),
+                (W - largura_feixe, H)
+            ]
+            draw.polygon(pts_feixe, fill=(255, 232, 165, alpha_feixe))
+            # Brilho central cegante no final da transição
+            raio_sol = int(40 + 750 * (t ** 2.4))
+            draw.ellipse((cx - raio_sol, cy - raio_sol, cx + raio_sol, cy + raio_sol), fill=(255, 246, 215, int(255 * (t ** 1.8))))
+            frame = Image.alpha_composite(frame, overlay)
+        else:
+            # Túnel Vórtice Espiral em Carmesim & Ouro (igual 00:25 do video_1.mp4!)
+            frame = Image.new("RGBA", (W, H), (38, 10, 5, 255))
+            draw = ImageDraw.Draw(frame)
+            cx, cy = W // 2, H // 2
+            rot_base = t * 540.0
+            for ring in range(28, 0, -1):
+                frac = ring / 28.0
+                r_x = int(W * 0.85 * frac)
+                r_y = int(H * 0.65 * frac)
+                off_x = int(math.cos(math.radians(rot_base + ring * 26)) * 55 * frac)
+                off_y = int(math.sin(math.radians(rot_base + ring * 26)) * 55 * frac)
+                cor_anel = (158, 42, 24, 255) if ring % 2 == 0 else (228, 175, 95, 255)
+                draw.ellipse((cx - r_x + off_x, cy - r_y + off_y, cx + r_x + off_x, cy + r_y + off_y), fill=cor_anel)
+            # Núcleo luminoso abrindo para revelar a carta 2D de volta
+            r_core = int(30 + 650 * (t ** 2.2))
+            draw.ellipse((cx - r_core, cy - r_core, cx + r_core, cy + r_core), fill=(255, 242, 210, 255))
+            if t > 0.55:
+                alpha_c = int(((t - 0.55) / 0.45) * 255)
+                c_layer = Image.new("RGBA", (W, H), (24, 11, 5, alpha_c))
+                c_layer.paste(card_resized, ((W - cw)//2, (H - ch)//2), card_resized)
+                frame = Image.alpha_composite(frame, c_layer)
 
-    # O personagem/elementos são onde a cor difere do fundo OU onde há traços pretos de xilogravura
-    luminancia = 0.299 * rgb[:, :, 0] + 0.587 * rgb[:, :, 1] + 0.114 * rgb[:, :, 2]
-    fg_raw = ((dist_bg > 34.0) | (luminancia < 85.0)) & inner_mask
+        proc.stdin.write(frame.convert("RGB").tobytes())
 
-    # Fecha buracos internos da silhueta do personagem para formar um recorte sólido de papel
-    fg_closed = ndimage.binary_closing(fg_raw, structure=np.ones((9, 9)))
-    fg_filled = ndimage.binary_fill_holes(fg_closed)
+    proc.stdin.close()
+    proc.wait()
+    return out_path
 
-    # Foca a silhueta do personagem central (com máscara espacial suave nas laterais)
-    yy, xx = np.mgrid[0:h, 0:w]
-    centro_mask = ((xx > w * 0.14) & (xx < w * 0.86) & (yy > h * 0.08) & (yy < h * 0.82))
-    silhueta_mask = fg_filled & centro_mask
-    silhueta_mask = ndimage.binary_opening(silhueta_mask, structure=np.ones((5, 5)))
-    silhueta_mask = ndimage.binary_dilation(silhueta_mask, structure=np.ones((4, 4)))
-
-    # Cria a borda branca/pergaminho ao redor da silhueta recortada (Efeito Paper Cutout autêntico!)
-    borda_dilatada = ndimage.binary_dilation(silhueta_mask, structure=np.ones((11, 11)))
-    apenas_borda = borda_dilatada & (~silhueta_mask)
-
-    cutout_arr = np.zeros((h, w, 4), dtype=np.uint8)
-    # Pinta a borda de papel papiro (#F2DEC1) e sombra escura ao redor do personagem recortado
-    cutout_arr[apenas_borda] = [238, 214, 178, 255]
-    cutout_arr[silhueta_mask, :3] = arr[silhueta_mask, :3]
-    cutout_arr[silhueta_mask, 3] = 255
-    personagem_cutout = Image.fromarray(cutout_arr, mode="RGBA")
-
-    # Cria elementos de 1º plano (base inferior da carta, pedras, plantas, escudo e letreiro recortado)
-    fg_base_mask = np.zeros((h, w), dtype=bool)
-    fg_base_mask[int(h * 0.68):int(h * 0.94), int(w * 0.06):int(w * 0.94)] = True
-    fg_base_mask = fg_base_mask & ((dist_bg > 28.0) | (yy > h * 0.83))
-    fg_base_dil = ndimage.binary_dilation(fg_base_mask, structure=np.ones((6, 6)))
-    borda_fg = fg_base_dil & (~fg_base_mask)
-
-    fg_arr = np.zeros((h, w, 4), dtype=np.uint8)
-    fg_arr[borda_fg] = [213, 173, 122, 240]
-    fg_arr[fg_base_mask, :3] = arr[fg_base_mask, :3]
-    fg_arr[fg_base_mask, 3] = 255
-    primeiro_plano_cutout = Image.fromarray(fg_arr, mode="RGBA")
-
-    # Cria pilastras/arcos laterais em estilo diorama para passarem pela câmera durante o zoom
-    pilares_arr = np.zeros((h, w, 4), dtype=np.uint8)
-    larg_pilar = int(w * 0.13)
-    pilares_arr[:, :larg_pilar, :3] = arr[:, :larg_pilar, :3]
-    pilares_arr[:, :larg_pilar, 3] = 255
-    pilares_arr[:, w-larg_pilar:, :3] = arr[:, w-larg_pilar:, :3]
-    pilares_arr[:, w-larg_pilar:, 3] = 255
-    pilares_laterais = Image.fromarray(pilares_arr, mode="RGBA")
-
-    return personagem_cutout, primeiro_plano_cutout, pilares_laterais
-
-def projetar_plano_3d_perspectiva(img_rgba: Image.Image, yaw_graus: float, pitch_graus: float = 0.0) -> Image.Image:
+def animar_keyframe_com_camera_3d(
+    img_scene_pil: Image.Image,
+    movimento: str,
+    saida_clip: Path,
+    duracao_s: float = 3.2,
+    fps: int = 24,
+    W: int = 720,
+    H: int = 1280
+) -> bool:
     """
-    Aplica deformação real de perspectiva 3D (Homografia 8-coeficientes) em vez de apenas
-    achatar a largura ou inverter a imagem! Mantém a orientação correta da arte da carta,
-    criando o efeito de câmera orbitando no espaço 3D ao redor do recorte de papel,
-    com múltiplas camadas de extrusão lateral (espessura 3D do cartão).
+    Fallback cinematográfico de alta fluidez para cada Keyframe Ilustrado caso as filas
+    gratuitas de Image-to-Video do Hugging Face estejam congestionadas:
+    Aplica movimento de câmera 3D contínuo (Orbital Pan, Dive-in sobre o cenário ou Tilt-up celestial)
+    em cima das ilustrações geradas em tela cheia 9:16!
     """
-    w, h = img_rgba.size
-    # Limita o ângulo visual de cada plano para que a câmera orbite com paralaxe 3D realista SEM espelhar o texto/arte ao avesso!
-    rad_y = math.radians(yaw_graus)
-    inclinacao = math.sin(rad_y) # -1.0 a +1.0
-    escala_x = 0.72 + 0.28 * math.cos(rad_y) # Nunca zera nem inverte a imagem!
+    total_f = max(16, int(duracao_s * fps))
+    ffmpeg_exe = obter_executavel_ffmpeg()
+    src = img_scene_pil.convert("RGB").resize((int(W * 1.28), int(H * 1.28)), Image.Resampling.LANCZOS)
+    sw, sh = src.size
 
-    # Calcula os 4 vértices do trapézio em perspectiva 3D
-    margem_x = (w * (1.0 - escala_x)) * 0.5
-    desvio_y = h * 0.09 * inclinacao
+    cmd = [
+        ffmpeg_exe, "-y", "-f", "rawvideo", "-vcodec", "rawvideo",
+        "-s", f"{W}x{H}", "-pix_fmt", "rgb24", "-r", str(fps), "-i", "-",
+        "-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p", str(saida_clip)
+    ]
+    proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
-    # Vértices de destino (x0,y0 = sup esq, x1,y1 = sup dir, x2,y2 = inf dir, x3,y3 = inf esq)
-    dx_esq = margem_x
-    dx_dir = w - margem_x
-    dy_esq_top = max(0.0, -desvio_y)
-    dy_esq_bot = h - max(0.0, -desvio_y)
-    dy_dir_top = max(0.0, desvio_y)
-    dy_dir_bot = h - max(0.0, desvio_y)
+    for i in range(total_f):
+        t = i / max(1, total_f - 1)
+        ease = t * t * (3 - 2 * t)
+        if movimento == "orbita_arquetipo":
+            scale = 1.05 + 0.16 * math.sin(t * math.pi)
+            ox = int((sw - W * scale) * 0.5 + math.sin(t * math.pi * 1.5) * 75)
+            oy = int((sh - H * scale) * 0.45)
+        elif movimento == "mergulho_cenario":
+            scale = 1.02 + 0.22 * ease
+            ox = int((sw - W * scale) * 0.5 - 45 * math.cos(t * math.pi))
+            oy = int((sh - H * scale) * (0.65 - 0.25 * ease))
+        else: # tilt_up_ceu
+            scale = 1.12 - 0.08 * ease
+            ox = int((sw - W * scale) * 0.5)
+            oy = int((sh - H * scale) * (0.85 - 0.75 * ease))
 
-    # Resolve matriz de homografia (destino -> origem)
-    src = np.array([[0, 0], [w, 0], [w, h], [0, h]], dtype=np.float64)
-    dst = np.array([
-        [dx_esq, dy_esq_top],
-        [dx_dir, dy_dir_top],
-        [dx_dir, dy_dir_bot],
-        [dx_esq, dy_esq_bot]
-    ], dtype=np.float64)
+        crop_w, crop_h = int(W * scale), int(H * scale)
+        ox = max(0, min(sw - crop_w, ox))
+        oy = max(0, min(sh - crop_h, oy))
+        frame = src.crop((ox, oy, ox + crop_w, oy + crop_h)).resize((W, H), Image.Resampling.BILINEAR)
+        proc.stdin.write(frame.tobytes())
 
-    A = []
-    B = []
-    for i in range(4):
-        x, y = dst[i]
-        u, v = src[i]
-        A.append([x, y, 1, 0, 0, 0, -x*u, -y*u])
-        A.append([0, 0, 0, x, y, 1, -x*v, -y*v])
-        B.append(u)
-        B.append(v)
-    coeffs = np.linalg.solve(np.array(A), np.array(B))
+    proc.stdin.close()
+    proc.wait()
+    return saida_clip.exists()
 
-    warped = img_rgba.transform((w, h), Image.Transform.PERSPECTIVE, coeffs.tolist(), Image.Resampling.BICUBIC)
-
-    # Cria extrusão 3D real (várias fatias laterais dando espessura de placa de madeira/papiro recortado)
-    canvas = Image.new("RGBA", (w, h), (0, 0, 0, 0))
-    dir_extrusao = int(-inclinacao * 14)
-    if abs(dir_extrusao) > 1:
-        r, g, b, a = warped.split()
-        fatia_escura = Image.merge("RGBA", (
-            r.point(lambda _: 115),
-            g.point(lambda _: 78),
-            b.point(lambda _: 42),
-            a
-        ))
-        passos = abs(dir_extrusao)
-        sinal = 1 if dir_extrusao > 0 else -1
-        for s in range(passos, 0, -1):
-            canvas.paste(fatia_escura, (s * sinal, int(abs(s) * 0.4)), warped)
-
-    canvas.paste(warped, (0, 0), warped)
-    return canvas
-
-def renderizar_video_nativo_gratuito(
+def renderizar_video_cinematografico_multicenas(
     img_bytes: bytes,
     plano: dict,
     saida_raw: Path,
     barra_progresso,
     texto_status,
-    duracao_s: int = 10,
-    fps: int = 24
+    duracao_s: int = 12,
+    hf_token: str = "",
+    fal_key: str = "",
+    usar_ia_video_cloud: bool = True
 ) -> bool:
     """
-    Novo Motor Diorama 3D Multi-Camadas:
-    - A carta 2D abre-se como um teatro/diorama 3D;
-    - A moldura e os pilares passam pelas bordas da lente;
-    - A silhueta REAL recortada do personagem fica no centro de um palco 3D com montanhas,
-      chão em perspectiva, tochas/brasas animadas e câmera orbitando com paralaxe de 6 camadas;
-    - Depois a câmera faz o Tilt-up contínuo pelas montanhas até a Esfera Armilar no céu!
+    Orquestrador Cinematográfico Multi-Cenas (Exatamente como o `video_1.mp4` do mysticmayhem.ai):
+    1. Gera o Portal de Luz Dourada abrindo a carta 2D;
+    2. Gera 3 cenas ilustradas de tela cheia (9:16) no traço de gravura antiga da carta:
+       - Cena A: O Arquétipo central em ação viva com câmera orbitando em 360°;
+       - Cena B: O Cenário terrestre/marítimo/montanhas da carta em profundidade;
+       - Cena C: O Astro/Planeta/Sol/Lua no céu cósmico;
+    3. Anima cada cena com IA Generativa Image-to-Video (ou movimento de câmera 3D se a fila pública estiver cheia);
+    4. Conecta tudo com o Vórtice Espiral retornando à carta 2D!
     """
     W, H = 720, 1280
-    total_frames = duracao_s * fps
-    img_pil = Image.open(io.BytesIO(img_bytes))
-    card_full = img_pil.convert("RGBA").resize((int(W * 0.84), int(H * 0.80)), Image.Resampling.LANCZOS)
-    cw, ch = card_full.size
+    img_card_pil = Image.open(io.BytesIO(img_bytes)).convert("RGB")
+    camadas = plano.get("camadas_z_space", {})
+    arcano_nome = plano.get("arcano_nome", "Tarot Arcanum")
+    astro_ceu = plano.get("astro_revelacao_ceu", "Celestial Sun and Stars")
+    sab = plano.get("sabedoria_tres_planos", {})
+    acao_viva = sab.get("acao_viva", camadas.get("plano_medio", ""))
 
-    texto_status.info("✂️ Isolando silhueta real do personagem e construindo camadas 3D do Diorama...")
-    personagem_cutout, fg_base_cutout, pilares_laterais = extrair_silhueta_personagem_tarot(card_full)
+    clipes_para_unir = []
 
-    # Fundo atmosférico profundo (sem o personagem chapado)
-    bg_ambiente = img_pil.convert("RGB").resize((int(W * 1.35), int(H * 1.35)), Image.Resampling.LANCZOS)
-    bg_ambiente = bg_ambiente.filter(ImageFilter.GaussianBlur(radius=26))
-    bg_ambiente = ImageEnhance.Brightness(bg_ambiente).enhance(0.32)
-    sepia_bg = Image.new("RGB", bg_ambiente.size, (34, 15, 6))
-    bg_ambiente = Image.blend(bg_ambiente, sepia_bg, alpha=0.45)
+    # ATO 1: Portal de Luz Dourada disparando do centro da carta 2D (00:01 do video_1.mp4)
+    texto_status.info("✨ [Ato 1/5] Criando Portal de Luz Dourada a partir da carta original...")
+    barra_progresso.progress(12)
+    clip_portal = criar_transicao_portal_e_vortice_mystic(img_card_pil, "portal_luz", duracao_s=1.5)
+    clipes_para_unir.append(clip_portal)
 
-    cor_p = (243, 184, 82)
-    astro_txt = plano.get("astro_revelacao_ceu", "☉")
-    simbolo = plano.get("simbolo_unicode", "✦")
-    arcano_titulo = plano.get("arcano_nome", "ARCANO")
-
-    rng = random.Random(42)
-    estrelas = [(rng.randint(20, W-20), rng.randint(20, H-20), rng.randint(1, 3), rng.random()) for _ in range(150)]
-    particulas = [
-        {"x": rng.uniform(40, W-40), "y": rng.uniform(80, H-40), "vy": rng.uniform(3.5, 8.5), "r": rng.randint(2, 6), "fase": rng.uniform(0, 6.28), "camada": rng.choice([0, 1])}
-        for _ in range(75)
+    # Definição das 3 Cenas Cinematográficas em Tela Cheia (9:16)
+    cenas_roteiro = [
+        {
+            "nome": "Ato 2/5 — Órbita 360° no Arquétipo Vivo",
+            "prompt_img": f"{arcano_nome}, {camadas.get('plano_medio', '')}, {acao_viva}, dynamic 3/4 side view angle, dramatic clouds and sky behind",
+            "prompt_vid": f"360 degree cinematic camera orbit around {camadas.get('plano_medio', arcano_nome)}, {acao_viva}, vintage tarot woodcut illustration coming alive, smooth 3D motion",
+            "mov_cam": "orbita_arquetipo",
+            "usar_carta_original": True,
+            "seed": 101
+        },
+        {
+            "nome": "Ato 3/5 — Exploração do Cenário Terrestre",
+            "prompt_img": f"wide landscape scene from tarot card {arcano_nome}, {camadas.get('primeiro_plano', '')} in foreground, {camadas.get('plano_fundo', '')} in distance, detailed woodcut waves, cliffs and clouds",
+            "prompt_vid": f"first person camera flying forward over {camadas.get('primeiro_plano', '')} towards {camadas.get('plano_fundo', '')}, vintage tarot illustration style, volumetric clouds moving",
+            "mov_cam": "mergulho_cenario",
+            "usar_carta_original": False,
+            "seed": 202
+        },
+        {
+            "nome": "Ato 4/5 — Ascensão Cósmica ao Astro Regente",
+            "prompt_img": f"cosmic night sky above mountain peaks, giant glowing {astro_ceu} with golden cracks and celestial rings, stars and nebula in vintage woodcut tarot engraving style",
+            "prompt_vid": f"camera tilting up past snowy mountain peaks into outer space revealing glowing {astro_ceu} with golden energy, vintage tarot illustration",
+            "mov_cam": "tilt_up_ceu",
+            "usar_carta_original": False,
+            "seed": 303
+        }
     ]
+
+    dur_por_cena = max(2.5, (duracao_s - 3.0) / 3.0)
+
+    for idx, cena in enumerate(cenas_roteiro):
+        pct_atual = 22 + idx * 20
+        barra_progresso.progress(pct_atual)
+        texto_status.info(f"🎨 [{cena['nome']}] Gerando quadro ilustrado no traço da carta...")
+
+        if cena["usar_carta_original"]:
+            kf_pil = img_card_pil.resize((W, H), Image.Resampling.LANCZOS)
+        else:
+            kf_pil = gerar_keyframe_ilustrado_gratuito(cena["prompt_img"], seed=cena["seed"], W=W, H=H)
+            if kf_pil is None:
+                kf_pil = img_card_pil.resize((W, H), Image.Resampling.LANCZOS)
+
+        clip_path = PASTA_TEMP / f"cena_{idx}_{saida_raw.stem}.mp4"
+        gerado_por_ia = False
+
+        if usar_ia_video_cloud:
+            texto_status.info(f"🎬 [{cena['nome']}] Animando cena com IA Generativa de Vídeo...")
+            gerado_por_ia = animar_clipe_ia_cloud(
+                kf_pil,
+                cena["prompt_vid"],
+                clip_path,
+                hf_token=hf_token,
+                fal_key=fal_key
+            )
+
+        if not gerado_por_ia:
+            animar_keyframe_com_camera_3d(
+                kf_pil,
+                cena["mov_cam"],
+                clip_path,
+                duracao_s=dur_por_cena
+            )
+
+        if clip_path.exists():
+            clipes_para_unir.append(clip_path)
+
+    # ATO 5: Vórtice Espiral Carmesim/Ouro retornando à carta 2D original (00:25 do video_1.mp4)
+    texto_status.info("🌀 [Ato 5/5] Criando Vórtice Espiral de retorno para a carta original...")
+    barra_progresso.progress(84)
+    clip_vortice = criar_transicao_portal_e_vortice_mystic(img_card_pil, "vortice_espiral", duracao_s=1.6)
+    clipes_para_unir.append(clip_vortice)
+
+    # Une todos os 5 atos cinematográficos em um único vídeo contínuo via FFmpeg
+    lista_txt = PASTA_TEMP / f"concat_{saida_raw.stem}.txt"
+    with open(lista_txt, "w", encoding="utf-8") as f:
+        for cp in clipes_para_unir:
+            f.write(f"file '{cp.resolve()}'
+")
 
     ffmpeg_exe = obter_executavel_ffmpeg()
-    cmd = [
-        ffmpeg_exe, "-y",
-        "-f", "rawvideo",
-        "-vcodec", "rawvideo",
-        "-s", f"{W}x{H}",
-        "-pix_fmt", "rgb24",
-        "-r", str(fps),
-        "-i", "-",
-        "-c:v", "libx264",
-        "-preset", "ultrafast",
-        "-pix_fmt", "yuv420p",
+    cmd_concat = [
+        ffmpeg_exe, "-y", "-f", "concat", "-safe", "0", "-i", str(lista_txt),
+        "-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p",
         str(saida_raw)
     ]
-
-    proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-
-    for f_idx in range(total_frames):
-        t = f_idx / max(1, total_frames - 1)
-
-        # Roteiro Cinematográfico Contínuo:
-        # 0.00 -> 0.16: Desconstrução da carta 2D (os pilares da moldura avançam na direção da câmera e saem de quadro, revelando o palco 3D)
-        # 0.16 -> 0.70: Câmara caminha dentro do palco 3D e faz órbita em paralaxe real ao redor da silhueta recortada do personagem
-        # 0.70 -> 1.00: Tilt-up para o céu acima das montanhas revelando o Diagrama Celestial e a Esfera Armilar girando
-        if t < 0.16:
-            p = t / 0.16
-            ease = p * p * (3 - 2 * p)
-            cam_zoom = 1.0 + 0.32 * ease
-            pilar_zoom = 1.0 + 0.95 * ease
-            orbita_graus = ease * 25.0
-            tilt_ceu = 0.0
-            mix_carta_2d = max(0.0, 1.0 - p * 1.45)
-        elif t < 0.70:
-            p = (t - 0.16) / 0.54
-            cam_zoom = 1.32 + 0.22 * math.sin(p * math.pi)
-            pilar_zoom = 1.95 + 0.5 * p
-            # Oscilação orbital ampla em paralaxe 3D (mostrando a profundidade Z e as bordas recortadas sem inverter o personagem de cabeça/lado)
-            orbita_graus = 25.0 * math.cos(p * 2.0 * math.pi) + 38.0 * math.sin(p * 2.0 * math.pi)
-            tilt_ceu = 0.0
-            mix_carta_2d = 0.0
-        else:
-            p = (t - 0.70) / 0.30
-            ease = p * p * (3 - 2 * p)
-            cam_zoom = 1.32 - 0.15 * ease
-            pilar_zoom = 2.45
-            orbita_graus = (1.0 - ease) * 25.0
-            tilt_ceu = ease
-            mix_carta_2d = 0.0
-
-        desloc_x_cam = int(math.sin(math.radians(orbita_graus * 2.2)) * 55)
-        offset_y_cena = int(tilt_ceu * H * 0.92)
-
-        # 1. Céu Noturno & Abóbada Celeste
-        frame = Image.new("RGBA", (W, H), (18, 8, 3, 255))
-        draw_sky = ImageDraw.Draw(frame)
-
-        for sx, sy, sr, sf in estrelas:
-            brilho = int(140 + 110 * math.sin(f_idx * 0.22 + sf * 10))
-            pos_y_est = sy - int((1.0 - tilt_ceu) * H * 0.55)
-            pos_x_est = (sx - int(desloc_x_cam * 0.2)) % W
-            if 0 <= pos_y_est < H:
-                draw_sky.ellipse((pos_x_est-sr, pos_y_est-sr, pos_x_est+sr, pos_y_est+sr), fill=(242, 222, 193, brilho))
-
-        # 2. Fundo Atmosférico em Paralaxe Lenta (Z = -3)
-        bg_x = -(bg_ambiente.width - W) // 2 - int(desloc_x_cam * 0.35)
-        bg_y = -(bg_ambiente.height - H) // 2 + int(offset_y_cena * 0.75)
-        frame.paste(bg_ambiente, (bg_x, bg_y))
-
-        # 3. Cordilheira / Montanhas Escuras em Camadas 2.5D ao Fundo (Z = -2)
-        draw_bg_mounts = ImageDraw.Draw(frame)
-        base_montanha_y = int(H * 0.68) + offset_y_cena
-        pts_montanha_fundo = []
-        for mx in range(-80, W + 120, 40):
-            mh_val = int(95 * math.sin(mx * 0.012 + 1.2) + 55 * math.cos(mx * 0.028))
-            pts_montanha_fundo.append((mx - int(desloc_x_cam * 0.55), base_montanha_y - 120 + mh_val))
-        pts_montanha_fundo.extend([(W + 120, H + offset_y_cena), (-80, H + offset_y_cena)])
-        draw_bg_mounts.polygon(pts_montanha_fundo, fill=(28, 13, 6, 235), outline=(140, 94, 53, 180))
-
-        # 4. Chão de Palco 3D com Grade de Perspectiva Hermética (Z = -1 a +1)
-        chao_topo_y = int(H * 0.72) + offset_y_cena
-        if chao_topo_y < H:
-            draw_floor = ImageDraw.Draw(frame)
-            draw_floor.rectangle((0, chao_topo_y, W, H), fill=(22, 10, 4, 248))
-            vp_x = W // 2 - int(desloc_x_cam * 0.6)
-            for gx in range(-900, 1600, 110):
-                draw_floor.line([(vp_x, chao_topo_y), (gx - int(desloc_x_cam * 1.6), H)], fill=(122, 82, 48, 110), width=2)
-            for gy_step in [18, 45, 85, 140, 215, 310]:
-                ly = chao_topo_y + gy_step
-                if ly < H:
-                    draw_floor.line([(0, ly), (W, ly)], fill=(122, 82, 48, 95), width=1)
-
-        # 5. Partículas Traseiras (Fogo/Luz de Velas atrás do personagem)
-        draw_p = ImageDraw.Draw(frame)
-        for p in particulas:
-            p["y"] -= p["vy"]
-            if p["y"] < 0:
-                p["y"] = H
-            if p["camada"] == 0:
-                px = int(p["x"] + math.sin(f_idx * 0.14 + p["fase"]) * 16 - desloc_x_cam * 0.7) % W
-                py = int(p["y"] + offset_y_cena * 0.5) % H
-                r = p["r"]
-                draw_p.ellipse((px-r, py-r, px+r, py+r), fill=(cor_p[0], cor_p[1], cor_p[2], 175))
-
-        # 6. VIVIFICAÇÃO 3D DO PERSONAGEM RECORTADO (Marcha Viva / Respiração / Balanço Cinemático)
-        elemento_cenico = plano.get("elemento_cenico", "ar_abismo")
-        char_3d = projetar_plano_3d_perspectiva(personagem_cutout, orbita_graus)
-        # Simula a cadência viva do personagem (ex: passos da marcha do Louco + respiração torácica + leve inclinação do passo)
-        cadencia_passo_y = int(math.sin(f_idx * 0.45) * 9) if elemento_cenico == "ar_abismo" else int(math.sin(f_idx * 0.25) * 5)
-        respiracao_escala = 1.0 + 0.018 * math.sin(f_idx * 0.3)
-        inclinacao_marcha = math.sin(f_idx * 0.22) * (2.2 if elemento_cenico == "ar_abismo" else 1.0)
-        char_3d = char_3d.rotate(inclinacao_marcha, resample=Image.Resampling.BILINEAR, expand=False)
-
-        char_w = int(cw * cam_zoom * respiracao_escala)
-        char_h = int(ch * cam_zoom * respiracao_escala)
-        char_zoomed = char_3d.resize((char_w, char_h), Image.Resampling.BILINEAR)
-        char_x = (W - char_w) // 2 + int(desloc_x_cam * 0.95)
-        char_y = (H - char_h) // 2 + offset_y_cena + cadencia_passo_y
-        frame.paste(char_zoomed, (char_x, char_y), char_zoomed)
-
-        # 6B. EFEITOS CENOGRÁFICOS ELEMENTAIS VIVOS (Vento no Abismo, Labaredas de Fogo, Água/Névoa ou Relâmpagos)
-        draw_elem = ImageDraw.Draw(frame)
-        if elemento_cenico == "ar_abismo":
-            # Rajadas de vento douradas cruzando o abismo e nuvens passando sob os pés do Louco
-            for w_idx in range(7):
-                wy = int((H * 0.25 + w_idx * 115 + offset_y_cena * 0.8) % H)
-                wx_start = int((f_idx * (18 + w_idx * 3) + w_idx * 140) % (W + 300)) - 150
-                draw_elem.arc((wx_start, wy - 18, wx_start + 220, wy + 18), start=190, end=350, fill=(242, 222, 193, 115), width=2)
-        elif elemento_cenico in ("fogo_correntes", "fogo_pedra"):
-            # Labaredas e línguas de fogo vivas subindo da base do palco 3D
-            base_fogo_y = min(H - 10, int(H * 0.82) + offset_y_cena)
-            if base_fogo_y < H:
-                for fx in range(40, W - 40, 28):
-                    alt_chama = int(45 + 38 * math.sin(f_idx * 0.45 + fx * 0.15) + 22 * math.cos(f_idx * 0.7 - fx))
-                    osc_x = int(12 * math.sin(f_idx * 0.35 + fx))
-                    pts_chama = [(fx - 18, base_fogo_y + 40), (fx + osc_x, base_fogo_y - alt_chama), (fx + 18, base_fogo_y + 40)]
-                    draw_elem.polygon(pts_chama, fill=(235, 95, 25, 135))
-                    pts_nucleo = [(fx - 8, base_fogo_y + 40), (fx + int(osc_x*0.6), base_fogo_y - int(alt_chama*0.6)), (fx + 8, base_fogo_y + 40)]
-                    draw_elem.polygon(pts_nucleo, fill=(255, 205, 75, 175))
-        elif elemento_cenico == "agua_nevoa":
-            # Ondulações místicas de água/orvalho refletindo na base
-            base_agua_y = int(H * 0.78) + offset_y_cena
-            for ax in range(5):
-                ry = base_agua_y + ax * 28
-                if 0 < ry < H:
-                    desl_onda = int(35 * math.sin(f_idx * 0.2 + ax))
-                    draw_elem.arc((60 + desl_onda, ry - 10, W - 60 + desl_onda, ry + 14), start=0, end=180, fill=(175, 215, 235, 120), width=2)
-        elif elemento_cenico == "raio_pedra":
-            # Relâmpagos dramáticos cortando o céu em frames de impacto
-            if f_idx % 22 in (2, 3, 14):
-                rx = W // 2 + int(math.sin(f_idx) * 120)
-                pts_raio = [(rx, 0), (rx - 35, int(H*0.22)), (rx + 20, int(H*0.26)), (rx - 45, int(H*0.52))]
-                draw_elem.line(pts_raio, fill=(255, 245, 200, 235), width=4)
-
-        # 7. ELEMENTOS DE 1º PLANO EM PARALAXE MAIS RÁPIDA (Z = +1 -> Frente do Personagem!)
-        fg_3d = projetar_plano_3d_perspectiva(fg_base_cutout, orbita_graus * 1.25)
-        fg_w = int(cw * (cam_zoom * 1.14))
-        fg_h = int(ch * (cam_zoom * 1.14))
-        fg_zoomed = fg_3d.resize((fg_w, fg_h), Image.Resampling.BILINEAR)
-        fg_x = (W - fg_w) // 2 + int(desloc_x_cam * 1.55)
-        fg_y = (H - fg_h) // 2 + int(offset_y_cena * 1.18) + 28
-        frame.paste(fg_zoomed, (fg_x, fg_y), fg_zoomed)
-
-        # 8. Pilares / Moldura Passando pelas Bordas da Lente no Início do Zoom (Z = +2)
-        if pilar_zoom < 2.25:
-            pw = int(cw * pilar_zoom)
-            ph = int(ch * pilar_zoom)
-            pil_zoomed = pilares_laterais.resize((pw, ph), Image.Resampling.BILINEAR)
-            frame.paste(pil_zoomed, ((W - pw)//2 + int(desloc_x_cam * 1.9), (H - ph)//2 + int(offset_y_cena * 1.3)), pil_zoomed)
-
-        # 9. Revelação do Diagrama Celestial & Esfera Armilar Dinâmica no Topo (Tilt-up)
-        if tilt_ceu > 0.12:
-            alpha_astro = int(min(1.0, (tilt_ceu - 0.12) / 0.65) * 255)
-            cx_ceu, cy_ceu = W // 2, int(H * 0.36) - int((1.0 - tilt_ceu) * 260)
-            giro_anel = f_idx * 4.5
-            for idx_r, r_halo in enumerate([195, 150, 110]):
-                draw_sky.arc(
-                    (cx_ceu - r_halo, cy_ceu - r_halo, cx_ceu + r_halo, cy_ceu + r_halo),
-                    start=giro_anel * (1 if idx_r % 2 == 0 else -1),
-                    end=giro_anel * (1 if idx_r % 2 == 0 else -1) + 290,
-                    fill=(213, 173, 122, int(alpha_astro * 0.75)),
-                    width=3
-                )
-            draw_sky.ellipse((cx_ceu - 175, cy_ceu - 55, cx_ceu + 175, cy_ceu + 55), outline=(228, 189, 133, alpha_astro), width=3)
-            draw_sky.ellipse((cx_ceu - 55, cy_ceu - 175, cx_ceu + 55, cy_ceu + 175), outline=(184, 134, 59, int(alpha_astro * 0.65)), width=2)
-            draw_sky.ellipse((cx_ceu - 72, cy_ceu - 72, cx_ceu + 72, cy_ceu + 72), fill=(44, 22, 9, alpha_astro), outline=(243, 184, 82, alpha_astro), width=4)
-            draw_sky.text((cx_ceu, cy_ceu - 8), simbolo, fill=(255, 230, 180, alpha_astro), anchor="mm")
-            draw_sky.text((cx_ceu, cy_ceu + 122), astro_txt.upper(), fill=(243, 184, 82, alpha_astro), anchor="mm")
-            draw_sky.text((cx_ceu, cy_ceu + 154), arcano_titulo.upper(), fill=(230, 198, 150, alpha_astro), anchor="mm")
-
-        # 10. Partículas Frontais (Brasas passando perto da lente)
-        for p in particulas:
-            if p["camada"] == 1:
-                px = int(p["x"] + math.sin(f_idx * 0.18 + p["fase"]) * 22 - desloc_x_cam * 1.4) % W
-                py = int(p["y"]) % H
-                r = p["r"] + 1
-                draw_p.ellipse((px-r, py-r, px+r, py+r), fill=(255, 210, 120, 235))
-
-        # 11. Transição Suave da Carta 2D Original nos Primeiros Quadros
-        if mix_carta_2d > 0.01:
-            c2d_layer = Image.new("RGBA", (W, H), (23, 9, 3, int(255 * mix_carta_2d)))
-            card_2d_scaled = card_full.resize((cw, ch), Image.Resampling.LANCZOS)
-            mask_2d = Image.new("L", (cw, ch), int(255 * mix_carta_2d))
-            c2d_layer.paste(card_2d_scaled, ((W - cw)//2, (H - ch)//2), mask_2d)
-            frame = Image.alpha_composite(frame, c2d_layer)
-
-        proc.stdin.write(frame.convert("RGB").tobytes())
-
-        if f_idx % 8 == 0 or f_idx == total_frames - 1:
-            pct = int(15 + 72 * (f_idx / total_frames))
-            barra_progresso.progress(pct)
-            texto_status.info(f"🕯️ Renderizando Diorama 3D Multi-Camadas: quadro {f_idx+1}/{total_frames}...")
-
-    proc.stdin.close()
-    proc.wait()
+    subprocess.run(cmd_concat, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     return saida_raw.exists()
 
 def renderizar_video_veo(api_key: str, img_bytes: bytes, prompt_en: str, saida_raw: Path, barra_progresso, texto_status) -> bool:
@@ -1559,10 +1469,21 @@ with st.sidebar:
         "Chave Google Gemini (Opcional):",
         value=st.session_state.api_key_mem,
         type="password",
-        placeholder="Cole sua nova chave AIza... (ou deixe vazio)",
-        help="O aplicativo já possui o Oráculo Interno dos 22 Arcanos integrado! Mesmo sem chave (ou se sua chave anterior foi bloqueada), ele funciona 100% gratuito."
+        placeholder="Cole sua chave AIza... (ou deixe vazio)",
+        help="O aplicativo já possui o Oráculo Interno dos 22 Arcanos integrado! Mesmo sem chave, ele funciona 100% gratuito."
     )
     st.session_state.api_key_mem = nova_chave.strip()
+
+    if "hf_token_mem" not in st.session_state:
+        st.session_state.hf_token_mem = os.environ.get("HF_TOKEN", "")
+    hf_token_input = st.text_input(
+        "Token Gratuito Hugging Face (Opcional — Melhora fila de Vídeo IA):",
+        value=st.session_state.hf_token_mem,
+        type="password",
+        placeholder="hf_... (Crie grátis em huggingface.co/settings/tokens)",
+        help="Com um token gratuito do Hugging Face, você libera mais cotas diárias nos motores Wan-2.1 e LTX-Video!"
+    )
+    st.session_state.hf_token_mem = hf_token_input.strip()
 
     st.markdown("[🔑 Gerar Nova Chave no Google AI Studio](https://aistudio.google.com/apikey)")
     st.caption("💡 *Dica: Nunca cole sua chave em prints públicos ou códigos do GitHub, pois o Google bloqueia chaves expostas automaticamente.*")
@@ -1572,8 +1493,8 @@ with st.sidebar:
     motor_escolhido = st.radio(
         "Selecione o Motor:",
         [
-            "🆓 Motor Diorama 3D Silhueta Recortada (100% Gratuito / Instantâneo)",
-            "🌐 IA Generativa de Vídeo Cloud (Gratuito via Hugging Face + Fallback 3D)",
+            "🎬 Cine-Tarot Multi-Cenas IA (Estilo MysticMayhem — 100% Gratuito)",
+            "⚡ Cine-Tarot Rápido (Keyframes Ilustrados + Câmera 3D + Portais)",
             "💎 Google Veo 2.0 Cloud (Requer API Paga)"
         ],
         index=0
@@ -1879,32 +1800,26 @@ with col_dir:
             try:
                 duracao_ida = max(4, duracao_escolhida // 2) if aplicar_loop_reverso else duracao_escolhida
 
-                if "IA Generativa de Vídeo Cloud" in motor_escolhido:
-                    ok = renderizar_video_ia_generativa_gratuita(
-                        st.session_state.img_bytes,
-                        prompt_tecnico,
-                        raw_mp4,
-                        barra,
-                        status_txt
-                    )
-                    if not ok:
-                        status_txt.info("⚡ Filas públicas de IA cheias no momento — ativando Motor Diorama 3D Silhueta Recortada...")
-                        ok = renderizar_video_nativo_gratuito(
-                            st.session_state.img_bytes,
-                            plano,
-                            raw_mp4,
-                            barra,
-                            status_txt,
-                            duracao_s=duracao_ida
-                        )
-                elif "100% Gratuito" in motor_escolhido:
-                    ok = renderizar_video_nativo_gratuito(
+                if "Cine-Tarot Multi-Cenas IA" in motor_escolhido:
+                    ok = renderizar_video_cinematografico_multicenas(
                         st.session_state.img_bytes,
                         plano,
                         raw_mp4,
                         barra,
                         status_txt,
-                        duracao_s=duracao_ida
+                        duracao_s=duracao_ida,
+                        hf_token=st.session_state.hf_token_mem,
+                        usar_ia_video_cloud=True
+                    )
+                elif "Cine-Tarot Rápido" in motor_escolhido:
+                    ok = renderizar_video_cinematografico_multicenas(
+                        st.session_state.img_bytes,
+                        plano,
+                        raw_mp4,
+                        barra,
+                        status_txt,
+                        duracao_s=duracao_ida,
+                        usar_ia_video_cloud=False
                     )
                 else:
                     ok = renderizar_video_veo(st.session_state.api_key_mem, st.session_state.img_bytes, prompt_tecnico, raw_mp4, barra, status_txt)
