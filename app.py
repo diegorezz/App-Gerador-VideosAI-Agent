@@ -1,4 +1,5 @@
 import os
+import re
 import io
 import math
 import time
@@ -7,6 +8,7 @@ import random
 import shutil
 import subprocess
 from pathlib import Path
+import requests
 import numpy as np
 import streamlit as st
 import gdown
@@ -14,7 +16,7 @@ from PIL import Image, ImageDraw, ImageFilter, ImageEnhance
 from google import genai
 from google.genai import types
 
-# Fallback garantido para FFmpeg mesmo se packages.txt ainda não tiver reiniciado o container
+# Fallback garantido para FFmpeg
 try:
     import imageio_ffmpeg
     FFMPEG_BIN = shutil.which("ffmpeg") or imageio_ffmpeg.get_ffmpeg_exe()
@@ -65,7 +67,7 @@ def salvar_chave(chave: str):
     os.environ["GEMINI_API_KEY"] = chave.strip()
 
 def verificar_ffmpeg() -> bool:
-    return FFMPEG_BIN is not None and os.path.exists(FFMPEG_BIN) or shutil.which("ffmpeg") is not None
+    return (FFMPEG_BIN is not None and os.path.exists(FFMPEG_BIN)) or (shutil.which("ffmpeg") is not None)
 
 def obter_executavel_ffmpeg() -> str:
     return shutil.which("ffmpeg") or FFMPEG_BIN or "ffmpeg"
@@ -76,21 +78,99 @@ def converter_imagem_para_png_bytes(img_pil: Image.Image) -> bytes:
     img_rgb.save(buf, format="PNG")
     return buf.getvalue()
 
-def baixar_do_drive(url: str) -> list[Path]:
+# ==============================================================================
+# CONECTOR GOOGLE DRIVE ULTRA-RÁPIDO (EVITA TYPEERROR DO GDOWN E BAIXA SOB DEMANDA)
+# ==============================================================================
+def extrair_id_drive(url: str) -> tuple[str | None, str]:
+    """Extrai o ID limpo da pasta ou do arquivo do Google Drive, ignorando ?usp=drive_link."""
+    url = url.strip()
+    m_folder = re.search(r"/folders/([a-zA-Z0-9_-]+)", url)
+    if m_folder:
+        return m_folder.group(1), "folder"
+    m_file = re.search(r"/file/d/([a-zA-Z0-9_-]+)", url)
+    if m_file:
+        return m_file.group(1), "file"
+    m_id = re.search(r"[?&]id=([a-zA-Z0-9_-]+)", url)
+    if m_id:
+        return m_id.group(1), "file"
+    return None, "unknown"
+
+def listar_arquivos_pasta_drive(url: str) -> list[dict]:
+    """
+    Lista instantaneamente os arquivos de uma pasta pública do Drive (via embeddedfolderview)
+    sem travar baixando gigabytes de uma vez e sem quebrar com ?usp=drive_link.
+    Retorna lista de dicts: [{"name": nome, "id": file_id, "local_path": None}]
+    """
+    drive_id, tipo = extrair_id_drive(url)
+    if not drive_id:
+        raise ValueError("Link do Google Drive inválido. Use um link de pasta (/folders/...) ou arquivo (/file/d/...).")
+
+    extensoes_img = (".tif", ".tiff", ".png", ".jpg", ".jpeg", ".webp")
+
+    if tipo == "file":
+        return [{"name": f"Carta_Drive_{drive_id[:6]}.tif", "id": drive_id, "local_path": None}]
+
+    # Método 1: Leitura instantânea via página pública embeddedfolderview do Google Drive
+    embed_url = f"https://drive.google.com/embeddedfolderview?id={drive_id}#list"
+    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+    resp = requests.get(embed_url, headers=headers, timeout=20)
+
+    itens = []
+    if resp.status_code == 200:
+        # Captura blocos de entradas de arquivo na visualização de lista do Drive
+        padrao = re.compile(
+            r'id="entry-([a-zA-Z0-9_-]+)".*?class="flip-entry-title">([^<]+)</div>',
+            re.DOTALL
+        )
+        for m in padrao.finditer(resp.text):
+            f_id, f_name = m.group(1), m.group(2).strip()
+            if f_name.lower().endswith(extensoes_img):
+                itens.append({"name": f_name, "id": f_id, "local_path": None})
+
+    if itens:
+        itens.sort(key=lambda x: x["name"])
+        return itens
+
+    # Método 2 (Fallback): gdown passando id limpo e sem argumentos conflitantes
     pasta_destino = PASTA_TEMP / "drive_sync"
     pasta_destino.mkdir(exist_ok=True)
-    extensoes_img = {".tif", ".tiff", ".png", ".jpg", ".jpeg", ".webp"}
+    arquivos = gdown.download_folder(id=drive_id, output=str(pasta_destino), quiet=True, use_cookies=False)
+    if arquivos:
+        for p in arquivos:
+            caminho = Path(p)
+            if caminho.suffix.lower() in extensoes_img:
+                itens.append({"name": caminho.name, "id": None, "local_path": caminho})
+    return itens
 
-    if "/folders/" in url:
-        arquivos = gdown.download_folder(url=url, output=str(pasta_destino), quiet=True, use_cookies=False, remaining_ok=True)
-        if not arquivos:
-            return []
-        return [Path(p) for p in arquivos if Path(p).suffix.lower() in extensoes_img]
-    else:
-        arq = gdown.download(url=url, output=str(pasta_destino) + "/", quiet=True, fuzzy=True)
-        if arq and os.path.exists(arq):
-            return [Path(arq)]
-        return []
+def baixar_carta_individual_drive(item: dict) -> Path:
+    """Baixa apenas a carta selecionada pelo usuário (muito mais rápido e sem erro de limite)."""
+    if item.get("local_path") and Path(item["local_path"]).exists():
+        return Path(item["local_path"])
+
+    pasta_destino = PASTA_TEMP / "drive_sync"
+    pasta_destino.mkdir(exist_ok=True)
+    f_id = item["id"]
+    destino_arquivo = pasta_destino / item["name"]
+
+    if destino_arquivo.exists() and destino_arquivo.stat().st_size > 1000:
+        return destino_arquivo
+
+    # Download direto via endpoint de exportação/uc do Google Drive
+    url_dl = f"https://drive.google.com/uc?id={f_id}&export=download"
+    caminho = gdown.download(url=url_dl, output=str(destino_arquivo), quiet=True, fuzzy=True)
+    if caminho and os.path.exists(caminho):
+        return Path(caminho)
+
+    # Fallback via requests direto
+    r = requests.get(url_dl, stream=True, timeout=30)
+    if r.status_code == 200:
+        with open(destino_arquivo, "wb") as f:
+            for chunk in r.iter_content(chunk_size=32768):
+                if chunk:
+                    f.write(chunk)
+        return destino_arquivo
+
+    raise RuntimeError("Não foi possível baixar esta carta. Verifique se a pasta do Drive está pública ('Qualquer pessoa com o link').")
 
 def diagnosticar_carta_ia(api_key: str, img_bytes: bytes, instrucao_usuario: str) -> dict:
     """Usa o Gemini 2.5 Flash (100% GRATUITO no Google AI Studio) para planejar o vídeo."""
@@ -113,16 +193,13 @@ def diagnosticar_carta_ia(api_key: str, img_bytes: bytes, instrucao_usuario: str
 # MOTOR 1 (100% GRATUITO E NATIVO): RENDERIZADOR 2.5D PARALLAX & CUTOUT ENGINE
 # ==============================================================================
 def separar_camadas_25d(img_card: Image.Image, W: int = 720, H: int = 1280):
-    """Cria as camadas de profundidade Z-space (Fundo místico, Figura Central Recortada e Moldura/1º Plano)."""
     card_resized = img_card.convert("RGBA").resize((int(W * 0.82), int(H * 0.78)), Image.Resampling.LANCZOS)
     cw, ch = card_resized.size
 
-    # Camada 1: Fundo expandido desfocado e escurecido (cenário profundo)
     bg_layer = img_card.convert("RGB").resize((W, H), Image.Resampling.LANCZOS)
     bg_layer = bg_layer.filter(ImageFilter.GaussianBlur(radius=18))
     bg_layer = ImageEnhance.Brightness(bg_layer).enhance(0.38)
 
-    # Camada 2: Recorte Central (Sprite 2.5D estilo Paper Cutout com borda de papel/dourada)
     mask_mid = Image.new("L", (cw, ch), 0)
     draw_m = ImageDraw.Draw(mask_mid)
     draw_m.rounded_rectangle((int(cw*0.08), int(ch*0.10), int(cw*0.92), int(ch*0.88)), radius=28, fill=255)
@@ -130,11 +207,9 @@ def separar_camadas_25d(img_card: Image.Image, W: int = 720, H: int = 1280):
 
     mid_cutout = Image.new("RGBA", (cw, ch), (0, 0, 0, 0))
     mid_cutout.paste(card_resized, (0, 0), mask_mid)
-    # Adiciona borda fina estilo papel recortado (Paper Mario / Diorama)
     draw_border = ImageDraw.Draw(mid_cutout)
     draw_border.rounded_rectangle((int(cw*0.08), int(ch*0.10), int(cw*0.92), int(ch*0.88)), radius=28, outline=(235, 220, 185, 230), width=5)
 
-    # Camada 3: Moldura / Base inferior e topo da carta (Primeiro plano em paralaxe)
     fg_mask = Image.new("L", (cw, ch), 255)
     draw_fg = ImageDraw.Draw(fg_mask)
     draw_fg.rounded_rectangle((int(cw*0.12), int(ch*0.14), int(cw*0.88), int(ch*0.82)), radius=20, fill=0)
@@ -146,7 +221,6 @@ def separar_camadas_25d(img_card: Image.Image, W: int = 720, H: int = 1280):
     return card_resized, bg_layer, mid_cutout, fg_layer
 
 def aplicar_perspectiva_3d_cutout(img_rgba: Image.Image, angulo_graus: float) -> Image.Image:
-    """Simula rotação 3D no eixo Y de um recorte de papel (efeito 2.5D de espessura fina)."""
     w, h = img_rgba.size
     cos_a = math.cos(math.radians(angulo_graus))
     fator_largura = max(0.18, abs(cos_a))
@@ -157,7 +231,6 @@ def aplicar_perspectiva_3d_cutout(img_rgba: Image.Image, angulo_graus: float) ->
 
     canvas = Image.new("RGBA", (w, h), (0, 0, 0, 0))
     offset_x = (w - nova_w) // 2
-    # Sombra/espessura lateral do papel recortado quando gira
     espessura = int(6 * (1.0 - fator_largura)) + 2
     if espessura > 2:
         borda_papel = Image.new("RGBA", (nova_w, h), (180, 145, 75, 190))
@@ -174,14 +247,6 @@ def renderizar_video_nativo_gratuito(
     duracao_s: int = 8,
     fps: int = 24
 ) -> bool:
-    """
-    Motor 2.5D Diorama Parallax 100% Gratuito (Roda direto na CPU do Streamlit Cloud via FFmpeg Pipe).
-    Executa exatamente os 5 atos do vídeo referência:
-    1. Carta 2D estática -> Desconstrução em camadas Z-Space
-    2. Zoom-in + Órbita 3D (efeito recorte de papel girando)
-    3. Partículas místicas subindo
-    4. Tilt-up para o céu estrelado revelando o astro/símbolo do Arcano
-    """
     W, H = 720, 1280
     total_frames = duracao_s * fps
     img_pil = Image.open(io.BytesIO(img_bytes))
@@ -193,7 +258,6 @@ def renderizar_video_nativo_gratuito(
     simbolo = plano.get("simbolo_unicode", "✦")
     arcano_titulo = plano.get("arcano_nome", "ARCANO")
 
-    # Gera estrelas para o céu cósmico (Tilt-up)
     rng = random.Random(42)
     estrelas = [(rng.randint(20, W-20), rng.randint(20, H-20), rng.randint(1, 3), rng.random()) for _ in range(140)]
     particulas = [
@@ -219,12 +283,8 @@ def renderizar_video_nativo_gratuito(
     proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
     for f_idx in range(total_frames):
-        t = f_idx / max(1, total_frames - 1) # 0.0 -> 1.0
+        t = f_idx / max(1, total_frames - 1)
 
-        # Curvas de animação por fases:
-        # Fase 1 (0.00 - 0.18): Carta 2D original se separando em 3D
-        # Fase 2 (0.18 - 0.68): Zoom-in + Giro orbital 2.5D (Paper Cutout) + Paralaxe
-        # Fase 3 (0.68 - 1.00): Câmera sobe para o céu noturno (Tilt-up) e revela o Astro
         if t < 0.18:
             p_fase = t / 0.18
             zoom_bg = 1.0 + 0.08 * p_fase
@@ -238,13 +298,11 @@ def renderizar_video_nativo_gratuito(
             zoom_bg = 1.08 + 0.12 * math.sin(p_fase * math.pi)
             zoom_mid = 1.14 + 0.22 * math.sin(p_fase * math.pi)
             zoom_fg = 1.25 + 0.45 * p_fase
-            # Faz o efeito de órbita 360 graus mostrando o recorte fino 2.5D
             angulo_y = p_fase * 360.0
             tilt_ceu = 0.0
             mix_2d = 0.0
         else:
             p_fase = (t - 0.68) / 0.32
-            # Suavização cúbica para subida de câmera ao céu
             ease = p_fase * p_fase * (3 - 2 * p_fase)
             zoom_bg = 1.08
             zoom_mid = 1.14
@@ -253,11 +311,9 @@ def renderizar_video_nativo_gratuito(
             tilt_ceu = ease
             mix_2d = 0.0
 
-        # 1. Desenha o Céu Cósmico e o Cenário de Fundo (com deslocamento vertical de Tilt-up)
         frame = Image.new("RGBA", (W, H), (14, 9, 24, 255))
         draw_sky = ImageDraw.Draw(frame)
 
-        # Desenha estrelas e o Astro no topo quando a câmera sobe
         offset_y_cena = int(tilt_ceu * H * 0.88)
         for sx, sy, sr, sf in estrelas:
             brilho = int(155 + 100 * math.sin(f_idx * 0.2 + sf * 10))
@@ -265,28 +321,22 @@ def renderizar_video_nativo_gratuito(
             if 0 <= pos_y_estrela < H:
                 draw_sky.ellipse((sx-sr, pos_y_estrela-sr, sx+sr, pos_y_estrela+sr), fill=(brilho, brilho, 255, 255))
 
-        # Revelação do Astro / Planeta Regente no céu noturno
         if tilt_ceu > 0.15:
             alpha_astro = int(min(1.0, (tilt_ceu - 0.15) / 0.65) * 255)
             cx_ceu, cy_ceu = W // 2, int(H * 0.36)
-            # Halo místico dourado em camadas concêntricas
             for r_halo in range(160, 40, -20):
                 a_h = max(10, int(alpha_astro * (1 - r_halo / 170) * 0.35))
                 draw_sky.ellipse((cx_ceu - r_halo, cy_ceu - r_halo, cx_ceu + r_halo, cy_ceu + r_halo), outline=(cor_p[0], cor_p[1], cor_p[2], a_h), width=3)
-            # Anel planetário (estilo Saturno/Esfera celeste)
             draw_sky.arc((cx_ceu - 170, cy_ceu - 45, cx_ceu + 170, cy_ceu + 45), start=0, end=360, fill=(217, 178, 90, alpha_astro), width=4)
             draw_sky.ellipse((cx_ceu - 68, cy_ceu - 68, cx_ceu + 68, cy_ceu + 68), fill=(33, 26, 49, alpha_astro), outline=(217, 178, 90, alpha_astro), width=4)
-            # Textos da revelação cósmica
             draw_sky.text((cx_ceu, cy_ceu - 12), simbolo, fill=(255, 235, 170, alpha_astro), anchor="mm")
             draw_sky.text((cx_ceu, cy_ceu + 105), astro_txt.upper(), fill=(217, 178, 90, alpha_astro), anchor="mm")
             draw_sky.text((cx_ceu, cy_ceu + 138), arcano_titulo.upper(), fill=(239, 231, 214, alpha_astro), anchor="mm")
 
-        # 2. Renderiza Fundo da Carta (Z-Back)
         bg_w, bg_h = int(W * zoom_bg), int(H * zoom_bg)
         bg_zoomed = bg_layer.resize((bg_w, bg_h), Image.Resampling.BILINEAR)
         frame.paste(bg_zoomed, ((W - bg_w)//2, (H - bg_h)//2 + offset_y_cena))
 
-        # 3. Renderiza Figura Central Recortada em 2.5D com Giro Orbital 3D (Z-Mid)
         mid_3d = aplicar_perspectiva_3d_cutout(mid_cutout, angulo_y)
         mw, mh = int(cw * zoom_mid), int(ch * zoom_mid)
         mid_zoomed = mid_3d.resize((mw, mh), Image.Resampling.BILINEAR)
@@ -294,7 +344,6 @@ def renderizar_video_nativo_gratuito(
         pos_mid_y = (H - mh) // 2 + offset_y_cena
         frame.paste(mid_zoomed, (pos_mid_x, pos_mid_y), mid_zoomed)
 
-        # 4. Renderiza Primeiro Plano / Moldura em Paralaxe (Z-Front)
         if zoom_fg < 1.85:
             fw, fh = int(cw * zoom_fg), int(ch * zoom_fg)
             fg_zoomed = fg_layer.resize((fw, fh), Image.Resampling.BILINEAR)
@@ -302,13 +351,11 @@ def renderizar_video_nativo_gratuito(
             pos_fg_y = (H - fh) // 2 + int(offset_y_cena * 1.25)
             frame.paste(fg_zoomed, (pos_fg_x, pos_fg_y), fg_zoomed)
 
-        # 5. Transição suave a partir da Carta 2D pura nos primeiros frames
         if mix_2d > 0.01:
             c2d_layer = Image.new("RGBA", (W, H), (21, 16, 31, int(255 * mix_2d)))
             c2d_layer.paste(card_full, ((W - cw)//2, (H - ch)//2), card_full)
             frame = Image.alpha_composite(frame, c2d_layer)
 
-        # 6. Partículas Dinâmicas (Brasas / Luzes Astrais)
         draw_p = ImageDraw.Draw(frame)
         for p in particulas:
             p["y"] -= p["vy"]
@@ -319,7 +366,6 @@ def renderizar_video_nativo_gratuito(
             r = p["r"]
             draw_p.ellipse((px-r, py-r, px+r, py+r), fill=(cor_p[0], cor_p[1], cor_p[2], 210))
 
-        # Envia frame RGB para o pipe do FFmpeg
         proc.stdin.write(frame.convert("RGB").tobytes())
 
         if f_idx % 8 == 0 or f_idx == total_frames - 1:
@@ -331,9 +377,6 @@ def renderizar_video_nativo_gratuito(
     proc.wait()
     return saida_raw.exists()
 
-# ==============================================================================
-# MOTOR 2 (OPCIONAL): GOOGLE VEO 2.0 (PARA QUEM TIVER CHAVE COM BILLING)
-# ==============================================================================
 def renderizar_video_veo(api_key: str, img_bytes: bytes, prompt_en: str, saida_raw: Path, barra_progresso, texto_status) -> bool:
     client = genai.Client(api_key=api_key)
     operation = client.models.generate_videos(
@@ -461,21 +504,29 @@ with col_esq:
             if not url_drive:
                 st.error("Cole um link válido do Google Drive.")
             else:
-                with st.spinner("Conectando ao Google Drive e baixando cartas..."):
-                    encontrados = baixar_do_drive(url_drive)
-                    if encontrados:
-                        st.session_state.arquivos_drive = encontrados
-                        st.success(f"{len(encontrados)} carta(s) carregada(s) com sucesso!")
-                    else:
-                        st.error("Não foi possível baixar. Verifique se o link está público ('Qualquer pessoa com o link').")
+                with st.spinner("Listando cartas da pasta do Google Drive instantaneamente..."):
+                    try:
+                        encontrados = listar_arquivos_pasta_drive(url_drive)
+                        if encontrados:
+                            st.session_state.arquivos_drive = encontrados
+                            st.success(f"{len(encontrados)} carta(s) encontrada(s) na pasta!")
+                        else:
+                            st.error("Nenhuma imagem encontrada. Verifique se a permissão da pasta está como 'Qualquer pessoa com o link'.")
+                    except Exception as err_dl:
+                        st.error(f"Erro ao acessar link do Drive: {err_dl}")
 
         if st.session_state.arquivos_drive:
-            opcoes = {p.name: p for p in st.session_state.arquivos_drive}
+            opcoes = {item["name"]: item for item in st.session_state.arquivos_drive}
             escolhido_nome = st.selectbox("Selecione qual carta da pasta deseja usar:", list(opcoes.keys()))
-            caminho_escolhido = opcoes[escolhido_nome]
-            imagem_carregada = Image.open(caminho_escolhido)
-            st.session_state.nome_arquivo = caminho_escolhido.stem
-            st.session_state.img_bytes = converter_imagem_para_png_bytes(imagem_carregada)
+            item_escolhido = opcoes[escolhido_nome]
+            with st.spinner(f"Baixando e convertendo {escolhido_nome}..."):
+                try:
+                    caminho_escolhido = baixar_carta_individual_drive(item_escolhido)
+                    imagem_carregada = Image.open(caminho_escolhido)
+                    st.session_state.nome_arquivo = Path(escolhido_nome).stem
+                    st.session_state.img_bytes = converter_imagem_para_png_bytes(imagem_carregada)
+                except Exception as err_card:
+                    st.error(f"Erro ao carregar a carta selecionada: {err_card}")
 
     if st.session_state.img_bytes:
         st.image(st.session_state.img_bytes, caption=f"Carta Selecionada: {st.session_state.nome_arquivo}", use_container_width=True)
