@@ -16,6 +16,14 @@ from PIL import Image, ImageDraw, ImageFilter, ImageEnhance
 from google import genai
 from google.genai import types
 
+# Novo motor "Jornada pela Carta" (arquivo motor_jornada.py, na mesma pasta do app.py)
+try:
+    import motor_jornada as mj
+    _ERRO_MJ = ""
+except Exception as _e_mj:
+    mj = None
+    _ERRO_MJ = str(_e_mj)
+
 # Fallback garantido para FFmpeg
 try:
     import imageio_ffmpeg
@@ -1492,6 +1500,7 @@ with st.sidebar:
     motor_escolhido = st.radio(
         "Selecione o Motor:",
         [
+            "🎞️ Jornada pela Carta (cenas + transições — estilo MysticMayhem)",
             "🎬 Cine-Tarot Multi-Cenas IA (Estilo MysticMayhem — 100% Gratuito)",
             "⚡ Cine-Tarot Rápido (Keyframes Ilustrados + Câmera 3D + Portais)",
             "💎 Google Veo 2.0 Cloud (Requer API Paga)"
@@ -1699,8 +1708,96 @@ with col_dir:
             astro = st.text_input("🌌 Revelação no Diagrama Celestial (Tilt-up):", value=plano.get("astro_revelacao_ceu", ""))
             simbolo_uni = st.text_input("✡️ Glifo / Símbolo Hermético no Topo:", value=plano.get("simbolo_unicode", "✦"))
 
+        usar_jornada = "Jornada pela Carta" in motor_escolhido
+        jcfg = {}
+        if usar_jornada:
+            if mj is None:
+                st.error(f"Não consegui carregar o motor_jornada.py (ele precisa ficar na MESMA pasta do app.py). Detalhe: {_ERRO_MJ}")
+                st.stop()
+            import hashlib
+            tem_chave = len(st.session_state.api_key_mem) > 10
+            with st.expander("🎞️ Jornada pela Carta — cenas, transições e animação", expanded=True):
+                st.caption(
+                    "A carta é o 1º quadro, a câmera mergulha nela e atravessa CENAS diferentes nascidas dos símbolos da própria carta, "
+                    "e volta à carta no final (loop). Primeiro você vê o roteiro e as cenas; só depois manda animar."
+                )
+                jc1, jc2 = st.columns(2)
+                n_cenas = jc1.slider("Cenas entre a carta e a volta à carta:", 1, 5, 3, key="j_ncenas")
+                seg_clip = jc2.select_slider("Segundos por transição:", options=[4, 6, 8], value=6, key="j_seg")
+                usar_gem = st.checkbox(
+                    "🧠 Roteiro e cenas com Gemini (lê a SUA carta e pinta cenas no mesmo estilo)",
+                    value=tem_chave, disabled=not tem_chave, key="j_gem"
+                )
+                usar_veo = st.checkbox(
+                    "🎬 Animar com Veo 3.1 (PAGO) — gera o 'morph' entre cenas, como no Vídeo Modelo",
+                    value=False, disabled=not tem_chave, key="j_veo"
+                )
+                ritmo = st.slider("Ritmo (acelera os clipes do Veo):", 1.0, 1.6, 1.25, 0.05, key="j_ritmo")
+                with st.expander("⚙️ Avançado (nomes dos modelos)", expanded=False):
+                    modelo_veo = st.text_input("Modelo Veo:", value=mj.MODELO_VEO_PADRAO, key="j_mveo")
+                    modelo_img = st.text_input("Modelo de imagem (cenas):", value=mj.MODELOS_IMAGEM_PADRAO[0], key="j_mimg")
+                    if tem_chave and st.button("🔎 Ver modelos Veo disponíveis na minha chave", key="j_listar"):
+                        try:
+                            st.write(mj.listar_modelos_veo(st.session_state.api_key_mem) or "Nenhum modelo Veo liberado para esta chave.")
+                        except Exception as e_l:
+                            st.error(f"Não consegui listar: {e_l}")
+
+                if not tem_chave:
+                    st.info(
+                        "🔑 Sem chave Gemini: o app usa recortes REAIS da carta + transições locais (zoom através, luz, vórtice, whip-pan). "
+                        "Fica bem mais variado que antes, mas é um rascunho. O efeito de transformar a carta em OUTRAS cenas (mar, montanha, planeta) "
+                        "do Vídeo Modelo só existe com IA de vídeo: cole sua chave e ative o Veo."
+                    )
+                elif not usar_veo:
+                    st.info("Sem o Veo, as transições são feitas localmente (rascunho). Ative o Veo para o efeito completo.")
+
+                custo = mj.estimar_custo_usd(n_cenas, seg_clip, modelo_veo, usar_veo, usar_gem)
+                dur_est = (n_cenas + 1) * (seg_clip / ritmo if usar_veo else max(3.0, seg_clip * 0.75))
+                st.caption(
+                    f"⏱️ Duração estimada: ≈ {dur_est:.0f}s  |  💸 Custo estimado: "
+                    + (f"≈ US$ {custo:.2f} (valores aproximados; confira a página de preços do Google)" if custo > 0 else "US$ 0,00")
+                )
+                jcfg = dict(n_cenas=n_cenas, seg=seg_clip, usar_gem=usar_gem, usar_veo=usar_veo, ritmo=ritmo,
+                            modelo_veo=modelo_veo, modelo_img=modelo_img, dur_est=dur_est)
+
+                chave_j = (hashlib.md5(st.session_state.img_bytes[:100000]).hexdigest(), n_cenas, usar_gem)
+                if st.button("🎨 1) Criar roteiro + cenas (rápido) — ver antes de animar", use_container_width=True, key="j_prep"):
+                    barra_j = st.progress(2)
+                    status_j = st.empty()
+                    try:
+                        st.session_state.jornada = mj.preparar_jornada(
+                            st.session_state.img_bytes, plano, nome=st.session_state.nome_arquivo,
+                            api_key=st.session_state.api_key_mem, n_cenas=n_cenas, instrucao=ideia_custom,
+                            usar_gemini_roteiro=usar_gem, usar_gemini_imagens=usar_gem,
+                            modelos_imagem=[modelo_img] + [m for m in mj.MODELOS_IMAGEM_PADRAO if m != modelo_img],
+                            barra=barra_j, status=status_j,
+                        )
+                        st.session_state.jornada_chave = chave_j
+                        status_j.success("✅ Roteiro e cenas prontos! Confira abaixo e depois clique em GERAR VÍDEO.")
+                    except Exception as e_j:
+                        status_j.error(f"❌ Não consegui preparar a jornada: {e_j}")
+
+                jorn = st.session_state.get("jornada")
+                if jorn and st.session_state.get("jornada_chave") == chave_j:
+                    for av in jorn.get("avisos", []):
+                        st.warning(av)
+                    st.caption(f"📝 Roteiro: {jorn['roteiro'].get('origem', '')}")
+                    cols_kf = st.columns(len(jorn["keyframes"]))
+                    nomes_kf = ["Carta"] + [c.get("titulo", "Cena") for c in jorn["roteiro"]["cenas"]] + ["Volta"]
+                    for ck, kf, nm, og in zip(cols_kf, jorn["keyframes"], nomes_kf, jorn["origens"]):
+                        ck.image(kf, caption=f"{nm} ({og})", use_container_width=True)
+                    with st.expander("Ver prompts e transições do roteiro", expanded=False):
+                        for i, c in enumerate(jorn["roteiro"]["cenas"]):
+                            st.markdown(f"**Cena {i + 1} — {c.get('titulo', '')}:** {c.get('prompt_imagem', '') or '(recorte real da carta)'}")
+                        for i, t in enumerate(jorn["roteiro"]["transicoes"]):
+                            st.markdown(f"**Transição {i + 1} [{t.get('tipo', '')}]:** {t.get('movimento', '')}")
+
         with st.expander("⏱️ Duração, Biblioteca Musical & Loop Infinito", expanded=True):
-            duracao_escolhida = st.slider("Duração total do vídeo final (segundos):", min_value=8, max_value=30, value=int(st.session_state.duracao_total), step=2)
+            if usar_jornada:
+                duracao_escolhida = int(round(jcfg["dur_est"]))
+                st.caption(f"⏱️ Na Jornada, a duração vem das transições: ≈ {duracao_escolhida}s.")
+            else:
+                duracao_escolhida = st.slider("Duração total do vídeo final (segundos):", min_value=8, max_value=30, value=int(st.session_state.duracao_total), step=2)
 
             st.markdown("##### 🎵 Trilha Sonora do Vídeo (100% Livre de Direitos Autorais)")
             modo_trilha = st.radio(
@@ -1769,7 +1866,11 @@ with col_dir:
                     extensao_audio = Path(audio_upload.name).suffix or ".mp3"
                     st.audio(audio_bytes_selecionado)
 
-            aplicar_loop_reverso = st.checkbox("Ciclo Hermético Perfeito (Vai ao céu e retorna suavemente à carta 2D)", value=True)
+            if usar_jornada:
+                aplicar_loop_reverso = False
+                st.caption("🔁 O vídeo já fecha em loop: o último quadro é a própria carta (sem o 'reverse' que espelhava e repetia tudo).")
+            else:
+                aplicar_loop_reverso = st.checkbox("Ciclo Hermético Perfeito (Vai ao céu e retorna suavemente à carta 2D)", value=True)
 
         plano["astro_revelacao_ceu"] = astro
         plano["simbolo_unicode"] = simbolo_uni
@@ -1799,7 +1900,31 @@ with col_dir:
             try:
                 duracao_ida = max(4, duracao_escolhida // 2) if aplicar_loop_reverso else duracao_escolhida
 
-                if "Cine-Tarot Multi-Cenas IA" in motor_escolhido:
+                if usar_jornada:
+                    import hashlib as _hl
+                    chave_j = (_hl.md5(st.session_state.img_bytes[:100000]).hexdigest(), jcfg["n_cenas"], jcfg["usar_gem"])
+                    if not st.session_state.get("jornada") or st.session_state.get("jornada_chave") != chave_j:
+                        st.session_state.jornada = mj.preparar_jornada(
+                            st.session_state.img_bytes, plano, nome=st.session_state.nome_arquivo,
+                            api_key=st.session_state.api_key_mem, n_cenas=jcfg["n_cenas"], instrucao=ideia_custom,
+                            usar_gemini_roteiro=jcfg["usar_gem"], usar_gemini_imagens=jcfg["usar_gem"],
+                            modelos_imagem=[jcfg["modelo_img"]] + [m for m in mj.MODELOS_IMAGEM_PADRAO if m != jcfg["modelo_img"]],
+                            barra=barra, status=status_txt,
+                        )
+                        st.session_state.jornada_chave = chave_j
+                    rel_j = mj.animar_jornada(
+                        st.session_state.jornada, raw_mp4,
+                        api_key=st.session_state.api_key_mem, usar_veo=jcfg["usar_veo"],
+                        modelo_veo=jcfg["modelo_veo"], seg_por_clip=jcfg["seg"], ritmo=jcfg["ritmo"],
+                        pasta_temp=PASTA_TEMP, barra=barra, status=status_txt,
+                    )
+                    ok = rel_j["ok"]
+                    if rel_j.get("erros"):
+                        with st.expander("⚠️ Detalhes técnicos (o que falhou e caiu no motor local)", expanded=False):
+                            st.write(rel_j["erros"])
+                    if ok:
+                        st.caption("🎞️ Origem de cada transição: " + " → ".join(rel_j["clipes"]))
+                elif "Cine-Tarot Multi-Cenas IA" in motor_escolhido:
                     ok = renderizar_video_cinematografico_multicenas(
                         st.session_state.img_bytes,
                         plano,

@@ -52,3 +52,18 @@ Como este aplicativo foi construído em **Streamlit**, você pode colocá-lo gra
 1. Suba esta pasta para uma conta gratuita no [GitHub](https://github.com/).
 2. Entre em [share.streamlit.io](https://share.streamlit.io/), conecte seu GitHub e selecione o arquivo `app.py`.
 3. Pronto! Você terá um **link próprio na internet** (ex: `meu-tarot-video.streamlit.app`) que abre direto no celular ou em qualquer computador do mundo sem precisar instalar nada!
+
+
+---
+## 🎞️ Novo motor: "Jornada pela Carta" (motor_jornada.py)
+
+O arquivo `motor_jornada.py` precisa ficar **na mesma pasta do `app.py`** (se você sobe para o GitHub/Streamlit Cloud, envie os dois).
+
+1. Escolha **Jornada pela Carta** na barra lateral (já vem como padrão).
+2. Clique em **"1) Criar roteiro + cenas"** e confira as cenas ANTES de gastar com vídeo.
+3. Clique em **GERAR VÍDEO**.
+
+* **Sem chave Gemini:** recortes reais da carta + transições locais (rascunho, custo zero).
+* **Com chave Gemini:** o Gemini lê a sua carta, escreve o roteiro e pinta as cenas no estilo dela.
+* **Com chave + "Animar com Veo 3.1" (pago):** cada transição vira um "morph" feito por IA entre duas cenas — é o efeito do Vídeo Modelo.
+* O vídeo termina na própria carta (loop perfeito), por isso o "reverse" espelhado foi desligado neste motor.
