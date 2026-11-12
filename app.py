@@ -11,7 +11,6 @@ from pathlib import Path
 import requests
 import numpy as np
 import streamlit as st
-import gdown
 from PIL import Image, ImageDraw, ImageFilter, ImageEnhance
 from google import genai
 from google.genai import types
@@ -31,178 +30,137 @@ st.set_page_config(
 )
 
 # ==============================================================================
-# DESIGN SYSTEM: GUIA TAROT INICIÁTICO (PAPIRO ANTIGO, LUZ DE VELAS & CARMESIM)
-# Paleta extraída das referências visuais:
-# - Pergaminho / Papiro Antigo: #E6C696 | #DFB782 | #D1A671
-# - Mogno Escuro / Sombra à Luz de Velas: #140904 | #241107 | #3B1D0E
-# - Tinta de Gravura / Sépia Profundo: #3D2313 | #673F1D
-# - Carmesim Hermético / Manto Alquímico: #8B261D | #A43222
-# - Ouro de Candelabro / Chama: #B8863B | #E5A93C
+# DESIGN SYSTEM SUAVIZADO: LEITURA LIMPA (INTER / SANS) + DETALHES CLÁSSICOS
 # ==============================================================================
 DESIGN_SYSTEM_CSS = """
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@500;600;700&family=Cormorant+Garamond:ital,wght@0,400;0,600;0,700;1,400&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@500;600&family=Inter:wght@400;500;600&display=swap');
 
 :root {
-    --bg-candle-dark: #140904;
-    --bg-mahogany: #220E05;
-    --parchment-light: #F2DEC1;
-    --parchment-mid: #E6C696;
-    --parchment-aged: #D5AD7A;
-    --engraving-ink: #2C1609;
-    --sepia-line: #8C5E35;
+    --bg-candle-dark: #160B06;
+    --bg-mahogany: #221109;
+    --parchment-light: #F4E6D2;
+    --parchment-mid: #E5CFAF;
+    --parchment-aged: #C8A97E;
+    --sepia-line: #7A5230;
     --hermetic-crimson: #8B261D;
     --candle-gold: #C8923B;
-    --flame-glow: #F3B852;
 }
 
-/* Fundo Geral: Ambiência de Ritual à Luz de Velas e Madeira Antiga */
+/* Fundo Geral: Suave e confortável para leitura */
 .stApp {
-    background: radial-gradient(circle at 50% 12%, #2E1509 0%, #170A03 55%, #0C0401 100%) !important;
-    color: var(--parchment-mid) !important;
-    font-family: 'Cormorant Garamond', Georgia, serif !important;
-}
-
-/* Barra Lateral: Couro Antigo & Candelabro */
-section[data-testid="stSidebar"] {
-    background: linear-gradient(180deg, #1E0D05 0%, #120702 100%) !important;
-    border-right: 1px solid #5A381E !important;
-    box-shadow: 4px 0 24px rgba(0, 0, 0, 0.65) !important;
-}
-
-/* Tipografia Clássica Editorial ("Guia Tarot Iniciático") */
-h1, h2, h3, .tarot-title {
-    font-family: 'Cinzel', 'Cormorant Garamond', Georgia, serif !important;
+    background: radial-gradient(circle at 50% 10%, #2A140A 0%, #160B06 60%, #0E0603 100%) !important;
     color: var(--parchment-light) !important;
-    letter-spacing: 0.06em !important;
-    text-shadow: 0 2px 10px rgba(0, 0, 0, 0.75);
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif !important;
 }
 
-p, label, .stMarkdown, .stCaption {
-    font-family: 'Cormorant Garamond', Georgia, serif !important;
-    font-size: 1.08rem !important;
+/* Barra Lateral */
+section[data-testid="stSidebar"] {
+    background: #1A0C06 !important;
+    border-right: 1px solid #4A2E18 !important;
+}
+
+/* Títulos com Cinzel suave (sem exagero e sem sombra pesada) */
+h1, h2, h3 {
+    font-family: 'Cinzel', Georgia, serif !important;
+    color: var(--parchment-light) !important;
+    letter-spacing: 0.03em !important;
+    font-weight: 600 !important;
+}
+
+/* Textos corridos, labels, inputs e alertas com fonte Inter super limpa e legível */
+p, label, span, div, .stMarkdown, .stCaption, li {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif !important;
+}
+
+p, label {
+    font-size: 0.96rem !important;
+    line-height: 1.55 !important;
     color: var(--parchment-mid) !important;
 }
 
-/* Cabeçalho Ornamentado estilo Capa do Livro "Guia Tarot Iniciático" */
+/* Cabeçalho Editorial Elegante e Compacto */
 .iniciatico-header {
-    background: linear-gradient(135deg, rgba(46, 21, 9, 0.92) 0%, rgba(26, 11, 4, 0.96) 100%);
-    border: 2px solid var(--sepia-line);
-    outline: 1px solid rgba(230, 198, 150, 0.25);
-    outline-offset: -6px;
-    border-radius: 6px;
-    padding: 22px 28px;
-    margin-bottom: 24px;
+    background: linear-gradient(135deg, rgba(42, 20, 10, 0.9) 0%, rgba(24, 11, 5, 0.95) 100%);
+    border: 1px solid var(--sepia-line);
+    border-radius: 8px;
+    padding: 16px 24px;
+    margin-bottom: 20px;
     text-align: center;
-    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.7), inset 0 0 40px rgba(184, 134, 59, 0.08);
 }
 
 .iniciatico-header .subtitle-top {
-    font-family: 'Cinzel', serif;
-    font-size: 0.85rem;
-    letter-spacing: 0.28em;
+    font-family: 'Inter', sans-serif;
+    font-size: 0.75rem;
+    font-weight: 600;
+    letter-spacing: 0.2em;
     color: var(--candle-gold);
     text-transform: uppercase;
     margin-bottom: 4px;
 }
 
 .iniciatico-header h1 {
-    font-size: 2.35rem !important;
+    font-size: 1.85rem !important;
     margin: 0 !important;
     color: var(--parchment-light) !important;
-    font-weight: 600 !important;
-}
-
-.iniciatico-divider {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 12px;
-    margin: 10px auto;
-    color: var(--candle-gold);
-    font-size: 1.1rem;
-}
-
-.iniciatico-divider::before,
-.iniciatico-divider::after {
-    content: "";
-    height: 1px;
-    width: 110px;
-    background: linear-gradient(90deg, transparent, var(--candle-gold), transparent);
 }
 
 .iniciatico-header .subtitle-bottom {
-    font-family: 'Cormorant Garamond', serif;
-    font-style: italic;
-    font-size: 1.15rem;
+    font-family: 'Inter', sans-serif;
+    font-size: 0.92rem;
     color: var(--parchment-aged);
-    margin-top: 2px;
+    margin-top: 6px;
 }
 
-/* Botões Primários: Manto Carmesim Hermético & Borda Dourada */
+/* Botões Primários */
 .stButton > button[kind="primary"], .stDownloadButton > button {
-    background: linear-gradient(180deg, #9E2E22 0%, #6E1B12 100%) !important;
-    color: #F8E5C8 !important;
+    background: linear-gradient(180deg, #9E2E22 0%, #731E15 100%) !important;
+    color: #FFF6E9 !important;
     border: 1px solid #D5A458 !important;
-    border-radius: 4px !important;
-    font-family: 'Cinzel', serif !important;
+    border-radius: 6px !important;
+    font-family: 'Inter', sans-serif !important;
     font-weight: 600 !important;
-    letter-spacing: 0.08em !important;
-    padding: 0.65rem 1.2rem !important;
-    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.6), inset 0 1px 0 rgba(255, 225, 175, 0.3) !important;
-    transition: all 0.25s ease !important;
+    font-size: 0.95rem !important;
+    letter-spacing: 0.02em !important;
+    padding: 0.55rem 1.1rem !important;
+    transition: all 0.2s ease !important;
 }
 
 .stButton > button[kind="primary"]:hover, .stDownloadButton > button:hover {
-    background: linear-gradient(180deg, #B5382A 0%, #822116 100%) !important;
+    background: linear-gradient(180deg, #B5382A 0%, #872419 100%) !important;
     border-color: #F3C677 !important;
-    box-shadow: 0 0 18px rgba(213, 164, 88, 0.45) !important;
-    transform: translateY(-1px);
 }
 
-/* Botões Secundários: Pergaminho Escuro */
+/* Botões Secundários (Seleção de Miniaturas) */
 .stButton > button[kind="secondary"] {
-    background: #281308 !important;
-    color: var(--parchment-mid) !important;
-    border: 1px solid var(--sepia-line) !important;
-    font-family: 'Cinzel', serif !important;
-}
-
-/* Campos de Entrada, Textarea e Selectbox: Papiro Escuro com Filete Sépia */
-.stTextInput input, .stTextArea textarea, div[data-baseweb="select"] > div {
-    background-color: #1D0D05 !important;
+    background: #26130A !important;
     color: var(--parchment-light) !important;
-    border: 1px solid #673F1D !important;
-    border-radius: 4px !important;
-    font-family: 'Cormorant Garamond', Georgia, serif !important;
-    font-size: 1.05rem !important;
-}
-
-.stTextInput input:focus, .stTextArea textarea:focus {
-    border-color: var(--candle-gold) !important;
-    box-shadow: 0 0 8px rgba(200, 146, 59, 0.35) !important;
-}
-
-/* Expanders e Painéis: Moldura Dupla de Carta em Papiro */
-div[data-testid="stExpander"] {
-    background: rgba(34, 15, 6, 0.85) !important;
-    border: 1px solid #673F1D !important;
-    border-radius: 5px !important;
-    box-shadow: inset 0 0 20px rgba(0,0,0,0.45);
-}
-
-/* Upload Box estilo Pergaminho */
-section[data-testid="stFileUploaderDropzone"] {
-    background: rgba(42, 19, 8, 0.7) !important;
-    border: 1px dashed #B8863B !important;
+    border: 1px solid #5C3A20 !important;
     border-radius: 6px !important;
+    font-family: 'Inter', sans-serif !important;
+    font-size: 0.85rem !important;
+    font-weight: 500 !important;
 }
 
-/* Imagens com Moldura de Carta à Luz de Velas */
+.stButton > button[kind="secondary"]:hover {
+    border-color: var(--candle-gold) !important;
+    background: #331A0E !important;
+}
+
+/* Inputs e Textareas limpos */
+.stTextInput input, .stTextArea textarea, div[data-baseweb="select"] > div {
+    background-color: #1E0E07 !important;
+    color: #F4E6D2 !important;
+    border: 1px solid #5C3A20 !important;
+    border-radius: 6px !important;
+    font-family: 'Inter', sans-serif !important;
+    font-size: 0.94rem !important;
+}
+
+/* Cartões de Miniatura na Galeria */
 div[data-testid="stImage"] img {
-    border: 2px solid #8C5E35;
+    border: 1px solid #7A5230;
     border-radius: 6px;
-    box-shadow: 0 12px 28px rgba(0, 0, 0, 0.75);
 }
 </style>
 """
@@ -210,7 +168,32 @@ st.markdown(DESIGN_SYSTEM_CSS, unsafe_allow_html=True)
 
 PASTA_TEMP = Path("./workspace_temp")
 PASTA_TEMP.mkdir(exist_ok=True)
-ARQUIVO_CHAVE = Path("./.api_key_saved")
+
+# Catálogo Esotérico Completo dos 22 Arcanos Maiores (Serve para legendar a galeria e como Oráculo Local caso a API Key falhe!)
+CATALOGO_ARCANOS = [
+    {"num": "0", "nome": "O Louco (Le Mat)", "simbolo": "☉", "astro": "Urano / Ar Primordial", "fg": "Cão em salto, flores do campo e cajado de peregrino", "mid": "O Viajante com trouxa às costas caminhando rumo ao abismo", "bg": "Montanhas douradas e horizonte aberto em papiro"},
+    {"num": "I", "nome": "O Mago (Le Bateleur)", "simbolo": "☿", "astro": "Mercúrio", "fg": "Mesa com taça, moedas, espada e bastão alquímico", "mid": "O Mago com chapéu de lemniscata (infinito) erguendo a varinha", "bg": "Jardim hermético sob céu dourado"},
+    {"num": "II", "nome": "A Sacerdotisa (La Papesse)", "simbolo": "☽", "astro": "Lua", "fg": "Livro aberto dos mistérios e dobras do manto sagrado", "mid": "A Alta Sacerdotisa coroada sentada no templo", "bg": "Colunas do templo e véu bordado"},
+    {"num": "III", "nome": "A Imperatriz (L'Impératrice)", "simbolo": "♀", "astro": "Vênus", "fg": "Escudo com a águia imperial e cetro do mundo", "mid": "A Imperatriz alada em seu trono real", "bg": "Campo fértil sob luz solar dourada"},
+    {"num": "IV", "nome": "O Imperador (L'Empereur)", "simbolo": "♈", "astro": "Áries / Júpiter", "fg": "Escudo da águia, cetro e pedra cúbica do trono", "mid": "O Imperador de perfil com pernas cruzadas em quatro", "bg": "Montanhas rochosas e domínio imperial"},
+    {"num": "V", "nome": "O Hierofante (Le Pape)", "simbolo": "♉", "astro": "Touro", "fg": "Dois discípulos ajoelhados no primeiro plano", "mid": "O Sumo Sacerdote abençoando com a cruz tríplice", "bg": "Pilares góticos do santuário"},
+    {"num": "VI", "nome": "Os Enamorados (L'Amoureux)", "simbolo": "♊", "astro": "Gêmeos", "fg": "O jovem entre os dois caminhos da virtude e da paixão", "mid": "As três figuras no plano terreno da escolha", "bg": "O Anjo Cupido irradiando luz solar no topo"},
+    {"num": "VII", "nome": "O Carro (Le Chariot)", "simbolo": "♋", "astro": "Câncer", "fg": "Dois cavalos (azul e vermelho) puxando a carruagem", "mid": "O Príncipe Triunfante sob o dossel estrelado", "bg": "Campos e muralhas da cidade ao fundo"},
+    {"num": "VIII", "nome": "A Justiça (La Justice)", "simbolo": "♎", "astro": "Libra", "fg": "Balança do equilíbrio perfeito e espada erguida", "mid": "A figura severa da Justiça entronizada", "bg": "Trono simétrico e véu dourado"},
+    {"num": "IX", "nome": "O Eremita (L'Hermite)", "simbolo": "♍", "astro": "Virgem / Saturno", "fg": "Cajado da prudência tocando o solo pedregoso", "mid": "O Sábio Ancião erguendo a lanterna da verdade", "bg": "Deserto noturno silencioso em papiro"},
+    {"num": "X", "nome": "A Roda da Fortuna (La Roue de Fortune)", "simbolo": "♃", "astro": "Júpiter", "fg": "Criaturas subindo e descendo no giro do destino", "mid": "A Grande Roda Cósmica sobre seu eixo", "bg": "A Esfinge coroada com espada no topo"},
+    {"num": "XI", "nome": "A Força (La Force)", "simbolo": "♌", "astro": "Leão", "fg": "O Leão vermelho com as fauces abertas", "mid": "A Dama com chapéu do infinito dominando a fera suavemente", "bg": "Planície aberta sob o céu"},
+    {"num": "XII", "nome": "O Enforcado (Le Pendu)", "simbolo": "♆", "astro": "Netuno / Água", "fg": "Raízes e gramíneas brotando na base das árvores", "mid": "O Iniciado suspenso pelo pé em meditação profunda", "bg": "Duas árvores podadas sustentando a trave"},
+    {"num": "XIII", "nome": "Arcano Sem Nome / A Morte (XIII)", "simbolo": "♏", "astro": "Escorpião", "fg": "Coroas, cabeças e plantas brotando do solo", "mid": "O Ceifador com sua grande foice da transmutação", "bg": "Terra negra fértil sob o horizonte"},
+    {"num": "XIV", "nome": "A Temperança (Tempérance)", "simbolo": "♐", "astro": "Sagitário", "fg": "Flores do campo e fluxo magnético entre duas ânforas", "mid": "O Anjo Alquímico transvasando a essência da vida", "bg": "Paisagem serena com aura solar"},
+    {"num": "XV", "nome": "O Diabo (Le Diable)", "simbolo": "♄", "astro": "Capricórnio / Saturno", "fg": "Duas figuras acorrentadas na base do pedestal", "mid": "Baphomet / O Diabo alado com tocha sobre o altar", "bg": "Caverna escura com brasas ardentes"},
+    {"num": "XVI", "nome": "A Torre (La Maison Dieu)", "simbolo": "♂", "astro": "Marte", "fg": "Duas figuras caindo entre pedras e centelhas coloridas", "mid": "A Torre de Babel com sua coroa sendo atingida", "bg": "Fogo celeste descendo do céu"},
+    {"num": "XVII", "nome": "A Estrela (L'Étoile)", "simbolo": "♒", "astro": "Aquário", "fg": "Duas ânforas derramando água viva no rio e na terra", "mid": "A Jovem ajoelhada sob o firmamento", "bg": "A Grande Estrela de oito pontas e sete estrelas menores"},
+    {"num": "XVIII", "nome": "A Lua (La Lune)", "simbolo": "♓", "astro": "Peixes / Lua", "fg": "O Lagostim emergindo das águas primordiais e dois cães", "mid": "Caminho sinuoso entre os dois guardiões", "bg": "Duas torres ao longe e a Lua irradiando gotas de orvalho"},
+    {"num": "XIX", "nome": "O Sol (Le Soleil)", "simbolo": "☉", "astro": "Sol", "fg": "Dois gêmeos de mãos dadas no jardim murado", "mid": "Muro alquímico e gotas de ouro solar", "bg": "O Grande Sol radiante de rosto humano no céu"},
+    {"num": "XX", "nome": "O Julgamento (Le Jugement)", "simbolo": "♇", "astro": "Plutão / Fogo Renovador", "fg": "Três figuras emergindo do túmulo em oração", "mid": "Ondas sonoras e nuvens celestiais", "bg": "O Anjo tocando a trombeta do despertar"},
+    {"num": "XXI", "nome": "O Mundo (Le Monde)", "simbolo": "♄", "astro": "Saturno / O Cosmos", "fg": "O Touro e o Leão nos cantos inferiores da carta", "mid": "A Figura Dançante dentro da Guirlanda Oval", "bg": "O Anjo e a Águia nos cantos superiores do firmamento"},
+]
 
 SYSTEM_PROMPT = """
 Você é um Diretor Técnico de Vídeo 2.5D/3D especialista em Tarô Iniciático e Gravuras Herméticas Renascentistas.
@@ -223,8 +206,8 @@ Retorne ESTRITAMENTE um JSON válido com a seguinte estrutura:
   "cor_particula_rgb": [228, 189, 133],
   "duracao_sugerida_segundos": 20,
   "camadas_z_space": {
-    "primeiro_plano": "Elementos na frente da cena (ex: tábuas, pedras, lírios, instrumentos herméticos)",
-    "plano_medio": "Figura central / arquétipo em recorte 2.5D com manto carmesim e traços de gravura",
+    "primeiro_plano": "Elementos na frente da cena",
+    "plano_medio": "Figura central / arquétipo em recorte 2.5D",
     "plano_fundo": "Paisagem renascentista em papiro antigo expandida ao fundo"
   },
   "particulas_e_fisica": "Efeitos ativos (ex: brasas de luz de vela, poeira de ouro hermético, centelhas solares)",
@@ -232,17 +215,6 @@ Retorne ESTRITAMENTE um JSON válido com a seguinte estrutura:
   "veo_prompt_en": "2.5D layered antique parchment cutout parallax animation of the provided Tarot card. Start with the flat vintage woodcut card on aged papyrus, deconstruct into 3D depth layers, candlelight golden particles floating, camera zooms in and orbits 360 degrees around the thin parchment-cutout central figure, camera tilts up to an antique celestial diagram and armillary sphere in the sky revealing the astrological symbol, then seamlessly loops back to the original 2D card frame. Renaissance engraving aesthetic, warm candlelight shadows, vertical 9:16."
 }
 """
-
-def carregar_chave_salva() -> str:
-    if os.environ.get("GEMINI_API_KEY"):
-        return os.environ.get("GEMINI_API_KEY")
-    if ARQUIVO_CHAVE.exists():
-        return ARQUIVO_CHAVE.read_text(encoding="utf-8").strip()
-    return ""
-
-def salvar_chave(chave: str):
-    ARQUIVO_CHAVE.write_text(chave.strip(), encoding="utf-8")
-    os.environ["GEMINI_API_KEY"] = chave.strip()
 
 def verificar_ffmpeg() -> bool:
     return (FFMPEG_BIN is not None and os.path.exists(FFMPEG_BIN)) or (shutil.which("ffmpeg") is not None)
@@ -257,7 +229,7 @@ def converter_imagem_para_png_bytes(img_pil: Image.Image) -> bytes:
     return buf.getvalue()
 
 # ==============================================================================
-# CONECTOR GOOGLE DRIVE ULTRA-RÁPIDO (LISTAGEM INSTANTÂNEA + DOWNLOAD SOB DEMANDA)
+# CONECTOR GOOGLE DRIVE SEM GDOWN.FUZZY (CORRIGE O ERRO DE SELEÇÃO + MINIATURAS)
 # ==============================================================================
 def extrair_id_drive(url: str) -> tuple[str | None, str]:
     url = url.strip()
@@ -280,7 +252,13 @@ def listar_arquivos_pasta_drive(url: str) -> list[dict]:
     extensoes_img = (".tif", ".tiff", ".png", ".jpg", ".jpeg", ".webp")
 
     if tipo == "file":
-        return [{"name": "Carta_Selecionada.tif", "id": drive_id, "local_path": None}]
+        return [{
+            "name": "Carta_Selecionada.tif",
+            "label": "Carta Individual do Drive",
+            "id": drive_id,
+            "thumb_url": f"https://drive.google.com/thumbnail?id={drive_id}&sz=w320",
+            "arcano_idx": 0
+        }]
 
     embed_url = f"https://drive.google.com/embeddedfolderview?id={drive_id}#list"
     headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
@@ -295,61 +273,98 @@ def listar_arquivos_pasta_drive(url: str) -> list[dict]:
         for m in padrao.finditer(resp.text):
             f_id, f_name = m.group(1), m.group(2).strip()
             if f_name.lower().endswith(extensoes_img):
-                itens.append({"name": f_name, "id": f_id, "local_path": None})
+                itens.append({"name": f_name, "id": f_id})
 
-    if itens:
-        itens.sort(key=lambda x: x["name"])
-        return itens
+    itens.sort(key=lambda x: x["name"])
 
-    pasta_destino = PASTA_TEMP / "drive_sync"
-    pasta_destino.mkdir(exist_ok=True)
-    arquivos = gdown.download_folder(id=drive_id, output=str(pasta_destino), quiet=True, use_cookies=False)
-    if arquivos:
-        for p in arquivos:
-            caminho = Path(p)
-            if caminho.suffix.lower() in extensoes_img:
-                itens.append({"name": caminho.name, "id": None, "local_path": caminho})
+    # Associa rótulos amigáveis dos 22 Arcanos caso a pasta tenha as 22 lâminas em ordem
+    for idx, item in enumerate(itens):
+        item["thumb_url"] = f"https://drive.google.com/thumbnail?id={item['id']}&sz=w320"
+        item["arcano_idx"] = idx if idx < len(CATALOGO_ARCANOS) else 0
+        if len(itens) == 22 and idx < 22:
+            arc = CATALOGO_ARCANOS[idx]
+            item["label"] = f"[{arc['num']}] {arc['nome']} — ({item['name']})"
+        else:
+            item["label"] = item["name"]
+
     return itens
 
-def baixar_carta_individual_drive(item: dict) -> Path:
-    if item.get("local_path") and Path(item["local_path"]).exists():
-        return Path(item["local_path"])
-
-    pasta_destino = PASTA_TEMP / "drive_sync"
+@st.cache_data(show_spinner=False)
+def baixar_bytes_carta_drive(file_id: str, file_name: str) -> bytes:
+    """
+    Baixa a imagem diretamente via HTTP Session do Google Drive (sem usar o argumento 'fuzzy'
+    do gdown que causava erro em algumas versões) e já retorna os bytes convertidos em PNG!
+    """
+    pasta_destino = PASTA_TEMP / "drive_cache"
     pasta_destino.mkdir(exist_ok=True)
-    f_id = item["id"]
-    destino_arquivo = pasta_destino / item["name"]
+    caminho_png_cache = pasta_destino / f"{file_id}.png"
 
-    if destino_arquivo.exists() and destino_arquivo.stat().st_size > 1000:
-        return destino_arquivo
+    if caminho_png_cache.exists() and caminho_png_cache.stat().st_size > 1000:
+        return caminho_png_cache.read_bytes()
 
-    url_dl = f"https://drive.google.com/uc?id={f_id}&export=download"
-    caminho = gdown.download(url=url_dl, output=str(destino_arquivo), quiet=True, fuzzy=True)
-    if caminho and os.path.exists(caminho):
-        return Path(caminho)
+    sess = requests.Session()
+    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
 
-    r = requests.get(url_dl, stream=True, timeout=30)
-    if r.status_code == 200:
-        with open(destino_arquivo, "wb") as f:
-            for chunk in r.iter_content(chunk_size=32768):
-                if chunk:
-                    f.write(chunk)
-        return destino_arquivo
+    # Tentativa 1: Download do arquivo original via Google Drive UC endpoint
+    url_uc = f"https://drive.google.com/uc?export=download&id={file_id}"
+    resp = sess.get(url_uc, headers=headers, stream=True, timeout=30)
 
-    raise RuntimeError("Não foi possível baixar esta carta. Verifique se a pasta do Drive está pública ('Qualquer pessoa com o link').")
+    # Se o Drive pedir token de confirmação para arquivos maiores
+    for k, v in resp.cookies.items():
+        if k.startswith("download_warning"):
+            resp = sess.get(f"{url_uc}&confirm={v}", headers=headers, stream=True, timeout=30)
+            break
+
+    raw_bytes = resp.content
+
+    # Tentativa 2 (Fallback ultra-rápido): Se o arquivo .tif falhar ou vier HTML, pega a imagem em alta resolução renderizada pelo servidor do Drive
+    try:
+        img = Image.open(io.BytesIO(raw_bytes))
+    except Exception:
+        url_hi_res = f"https://drive.google.com/thumbnail?id={file_id}&sz=w1600"
+        resp_thumb = sess.get(url_hi_res, headers=headers, timeout=25)
+        img = Image.open(io.BytesIO(resp_thumb.content))
+
+    png_bytes = converter_imagem_para_png_bytes(img)
+    caminho_png_cache.write_bytes(png_bytes)
+    return png_bytes
 
 # ==============================================================================
-# SELETOR INTELIGENTE DE MODELOS GEMINI (COM FALLBACK AUTOMÁTICO)
+# DIAGNÓSTICO IA + FALLBACK LOCAL INTELIGENTE (NUNCA TRAVA MESMO SE A CHAVE VAZAR)
 # ==============================================================================
-def diagnosticar_carta_ia(api_key: str, img_bytes: bytes, instrucao_usuario: str) -> dict:
-    client = genai.Client(api_key=api_key)
+def gerar_plano_oraculo_local(arcano_idx: int, duracao_s: int = 20) -> dict:
+    """Gera o plano de camadas 2.5D usando o banco de dados interno dos 22 Arcanos."""
+    arc = CATALOGO_ARCANOS[arcano_idx % len(CATALOGO_ARCANOS)]
+    return {
+        "arcano_nome": f"Arcano {arc['num']} — {arc['nome']}",
+        "simbolo_unicode": arc["simbolo"],
+        "cor_particula_rgb": [228, 189, 133],
+        "duracao_sugerida_segundos": duracao_s,
+        "camadas_z_space": {
+            "primeiro_plano": arc["fg"],
+            "plano_medio": arc["mid"],
+            "plano_fundo": arc["bg"]
+        },
+        "particulas_e_fisica": "Brasas douradas à luz de velas, poeira de papiro antigo e centelhas herméticas",
+        "astro_revelacao_ceu": arc["astro"],
+        "veo_prompt_en": (
+            f"2.5D layered antique parchment cutout parallax animation of Tarot card {arc['nome']}. "
+            f"Foreground: {arc['fg']}. Midground: {arc['mid']}. Background: {arc['bg']}. "
+            f"Camera zooms in and orbits 360 degrees around the cutout figure, then tilts up to an antique celestial diagram revealing {arc['astro']}."
+        ),
+        "_modelo_usado": "Oráculo Interno Iniciático (100% Gratuito / Sem Chave)"
+    }
 
+def diagnosticar_carta_ia(api_key: str, img_bytes: bytes, instrucao_usuario: str, arcano_idx: int = 0) -> dict:
+    # Se o usuário não colocou chave, usa direto o Oráculo Interno Gratuito
+    if not api_key or len(api_key.strip()) < 10:
+        return gerar_plano_oraculo_local(arcano_idx)
+
+    client = genai.Client(api_key=api_key.strip())
     modelos_candidatos = [
         "gemini-3.0-flash",
-        "gemini-3-flash-preview",
-        "gemini-flash-latest",
         "gemini-2.5-flash-lite",
-        "gemini-2.5-flash",
+        "gemini-2.0-flash",
     ]
 
     try:
@@ -357,7 +372,7 @@ def diagnosticar_carta_ia(api_key: str, img_bytes: bytes, instrucao_usuario: str
             nome_m = getattr(m, "name", "").replace("models/", "")
             if "gemini" in nome_m and "flash" in nome_m and "vision" not in nome_m and "tts" not in nome_m:
                 if nome_m not in modelos_candidatos:
-                    modelos_candidatos.insert(1, nome_m)
+                    modelos_candidatos.insert(0, nome_m)
     except Exception:
         pass
 
@@ -380,12 +395,24 @@ def diagnosticar_carta_ia(api_key: str, img_bytes: bytes, instrucao_usuario: str
             dados["_modelo_usado"] = modelo
             return dados
         except Exception as e:
-            ultimo_erro = e
+            ultimo_erro = str(e)
+            # Se a chave foi bloqueada por vazamento (403 leaked) ou inválida, interrompe na hora e ativa o Oráculo Local!
+            if "leaked" in ultimo_erro.lower() or "403" in ultimo_erro or "api_key_invalid" in ultimo_erro.lower():
+                plano_local = gerar_plano_oraculo_local(arcano_idx)
+                plano_local["_aviso_chave"] = (
+                    "⚠️ Sua chave da API do Google foi bloqueada pelo Google por ter aparecido publicamente "
+                    "('Your API key was reported as leaked'). Mas não se preocupe: o **Oráculo Interno Gratuito** "
+                    "assumiu automaticamente e já estruturou sua carta! (Para usar o Gemini novamente, crie uma chave nova em aistudio.google.com/apikey)."
+                )
+                return plano_local
             continue
 
-    raise RuntimeError(f"Não foi possível conectar aos modelos Gemini desta chave. Detalhe: {ultimo_erro}")
+    # Se qualquer outro erro ocorrer, também entrega o resultado via Oráculo Local para nunca travar o usuário
+    plano_fallback = gerar_plano_oraculo_local(arcano_idx)
+    plano_fallback["_aviso_chave"] = f"ℹ️ Usando Oráculo Interno Gratuito (Detalhe da API: {ultimo_erro})"
+    return plano_fallback
 
-def extrair_duracao_segundos(texto_usuario: str, padrao: int = 16) -> int:
+def extrair_duracao_segundos(texto_usuario: str, padrao: int = 20) -> int:
     m = re.search(r"(\d{1,2})\s*(?:s|seg|segundos)", texto_usuario.lower())
     if m:
         val = int(m.group(1))
@@ -399,15 +426,12 @@ def separar_camadas_25d(img_card: Image.Image, W: int = 720, H: int = 1280):
     card_resized = img_card.convert("RGBA").resize((int(W * 0.82), int(H * 0.78)), Image.Resampling.LANCZOS)
     cw, ch = card_resized.size
 
-    # Camada de Fundo: Ambiência quente de Papiro e Luz de Velas (#241107 / #845A35)
     bg_layer = img_card.convert("RGB").resize((W, H), Image.Resampling.LANCZOS)
     bg_layer = bg_layer.filter(ImageFilter.GaussianBlur(radius=18))
     bg_layer = ImageEnhance.Brightness(bg_layer).enhance(0.36)
-    # Aplica filtro sépia quente à luz de velas
     sepia_overlay = Image.new("RGB", (W, H), (46, 21, 9))
     bg_layer = Image.blend(bg_layer, sepia_overlay, alpha=0.32)
 
-    # Camada Central: Recorte em Papiro Antigo (#E6C696) com filete duplo de gravura (#673F1D)
     mask_mid = Image.new("L", (cw, ch), 0)
     draw_m = ImageDraw.Draw(mask_mid)
     draw_m.rounded_rectangle((int(cw*0.08), int(ch*0.10), int(cw*0.92), int(ch*0.88)), radius=22, fill=255)
@@ -416,11 +440,9 @@ def separar_camadas_25d(img_card: Image.Image, W: int = 720, H: int = 1280):
     mid_cutout = Image.new("RGBA", (cw, ch), (0, 0, 0, 0))
     mid_cutout.paste(card_resized, (0, 0), mask_mid)
     draw_border = ImageDraw.Draw(mid_cutout)
-    # Borda externa papiro e filete interno sépia (igual ao "Cartão em Branco à Luz de Velas.png")
     draw_border.rounded_rectangle((int(cw*0.08), int(ch*0.10), int(cw*0.92), int(ch*0.88)), radius=22, outline=(228, 189, 133, 245), width=6)
     draw_border.rounded_rectangle((int(cw*0.095), int(ch*0.112), int(cw*0.905), int(ch*0.868)), radius=18, outline=(103, 63, 29, 220), width=2)
 
-    # Primeiro Plano: Moldura da Carta
     fg_mask = Image.new("L", (cw, ch), 255)
     draw_fg = ImageDraw.Draw(fg_mask)
     draw_fg.rounded_rectangle((int(cw*0.12), int(ch*0.14), int(cw*0.88), int(ch*0.82)), radius=18, fill=0)
@@ -444,7 +466,6 @@ def aplicar_perspectiva_3d_cutout(img_rgba: Image.Image, angulo_graus: float) ->
     offset_x = (w - nova_w) // 2
     espessura = int(7 * (1.0 - fator_largura)) + 2
     if espessura > 2:
-        # Espessura lateral em tom de Papiro Antigo (#D5AD7A)
         borda_papiro = Image.new("RGBA", (nova_w, h), (213, 173, 122, 220))
         canvas.paste(borda_papiro, (offset_x + espessura, 2), img_rot)
     canvas.paste(img_rot, (offset_x, 0), img_rot)
@@ -465,7 +486,7 @@ def renderizar_video_nativo_gratuito(
     card_full, bg_layer, mid_cutout, fg_layer = separar_camadas_25d(img_pil, W, H)
     cw, ch = card_full.size
 
-    cor_p = (228, 189, 133) # Ouro/Pergaminho à Luz de Velas
+    cor_p = (228, 189, 133)
     astro_txt = plano.get("astro_revelacao_ceu", "☉")
     simbolo = plano.get("simbolo_unicode", "✦")
     arcano_titulo = plano.get("arcano_nome", "ARCANO")
@@ -523,7 +544,6 @@ def renderizar_video_nativo_gratuito(
             tilt_ceu = ease
             mix_2d = 0.0
 
-        # Fundo Noturno de Santuário à Luz de Velas (#170903)
         frame = Image.new("RGBA", (W, H), (23, 9, 3, 255))
         draw_sky = ImageDraw.Draw(frame)
 
@@ -534,24 +554,19 @@ def renderizar_video_nativo_gratuito(
             if 0 <= pos_y_estrela < H:
                 draw_sky.ellipse((sx-sr, pos_y_estrela-sr, sx+sr, pos_y_estrela+sr), fill=(230, 198, 150, brilho))
 
-        # Diagrama Celestial & Esfera Armilar no Topo (Inspirado nas imagens do Design System)
         if tilt_ceu > 0.15:
             alpha_astro = int(min(1.0, (tilt_ceu - 0.15) / 0.65) * 255)
             cx_ceu, cy_ceu = W // 2, int(H * 0.36)
-            # Anéis do Diagrama Celestial e Esfera Armilar
             for r_halo in [185, 145, 108]:
                 draw_sky.ellipse(
                     (cx_ceu - r_halo, cy_ceu - r_halo, cx_ceu + r_halo, cy_ceu + r_halo),
                     outline=(213, 173, 122, int(alpha_astro * 0.55)),
                     width=2
                 )
-            # Eixos da Esfera Armilar
             draw_sky.line((cx_ceu - 210, cy_ceu, cx_ceu + 210, cy_ceu), fill=(184, 134, 59, int(alpha_astro * 0.5)), width=1)
             draw_sky.line((cx_ceu, cy_ceu - 210, cx_ceu, cy_ceu + 210), fill=(184, 134, 59, int(alpha_astro * 0.5)), width=1)
-            # Anéis inclinados da Esfera Armilar
             draw_sky.arc((cx_ceu - 170, cy_ceu - 52, cx_ceu + 170, cy_ceu + 52), start=0, end=360, fill=(228, 189, 133, alpha_astro), width=3)
             draw_sky.ellipse((cx_ceu - 70, cy_ceu - 70, cx_ceu + 70, cy_ceu + 70), fill=(44, 22, 9, alpha_astro), outline=(228, 189, 133, alpha_astro), width=4)
-            # Símbolo e Textos em Pergaminho Dourado
             draw_sky.text((cx_ceu, cy_ceu - 10), simbolo, fill=(248, 211, 163, alpha_astro), anchor="mm")
             draw_sky.text((cx_ceu, cy_ceu + 118), astro_txt.upper(), fill=(228, 189, 133, alpha_astro), anchor="mm")
             draw_sky.text((cx_ceu, cy_ceu + 150), arcano_titulo.upper(), fill=(213, 173, 122, alpha_astro), anchor="mm")
@@ -579,7 +594,6 @@ def renderizar_video_nativo_gratuito(
             c2d_layer.paste(card_full, ((W - cw)//2, (H - ch)//2), card_full)
             frame = Image.alpha_composite(frame, c2d_layer)
 
-        # Partículas de Luz de Velas (Tons de Ouro & Âmbar Quente)
         draw_p = ImageDraw.Draw(frame)
         for p in particulas:
             p["y"] -= p["vy"]
@@ -595,7 +609,7 @@ def renderizar_video_nativo_gratuito(
         if f_idx % 8 == 0 or f_idx == total_frames - 1:
             pct = int(10 + 75 * (f_idx / total_frames))
             barra_progresso.progress(pct)
-            texto_status.info(f"🕯️ [Motor 2.5D Tarot Iniciático] Esculpindo papiro, luz de velas e esfera celestial ({f_idx+1}/{total_frames})...")
+            texto_status.info(f"🕯️ Renderizando quadro {f_idx+1}/{total_frames} (Camadas em Papiro, Giro 3D e Esfera Armilar)...")
 
     proc.stdin.close()
     proc.wait()
@@ -654,39 +668,40 @@ def pos_producao_loop_e_audio(video_raw: Path, audio_path: Path | None, video_fi
 
     subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
-# ================= CABEÇALHO EDITORIAL DO DESIGN SYSTEM =================
+# ================= CABEÇALHO EDITORIAL SUAVIZADO =================
 
 st.markdown("""
 <div class="iniciatico-header">
     <div class="subtitle-top">✦ ORÁCULO & ESTÚDIO DE ANIMAÇÃO HERMÉTICA ✦</div>
     <h1>Tarot Iniciático Studio 2.5D</h1>
-    <div class="iniciatico-divider">◇</div>
     <div class="subtitle-bottom">Os 22 Arcanos Maiores em Papiro Antigo, Paralaxe 2.5D e Luz de Velas</div>
 </div>
 """, unsafe_allow_html=True)
 
-with st.sidebar:
-    st.markdown("### 🕯️ 1. Santuário & Chave")
-    chave_atual = carregar_chave_salva()
-    nova_chave = st.text_input(
-        "Chave Gratuita Google Gemini (AIza...):",
-        value=chave_atual,
-        type="password",
-        help="A chave gratuita do Google AI Studio analisa a carta com Gemini 3.0 Flash sem custo."
-    )
-    if nova_chave != chave_atual and nova_chave:
-        salvar_chave(nova_chave)
-        st.success("Chave guardada no Santuário!")
+if "api_key_mem" not in st.session_state:
+    st.session_state.api_key_mem = os.environ.get("GEMINI_API_KEY", "")
 
-    st.markdown("[🔑 Obter Chave Gratuita no Google AI Studio](https://aistudio.google.com/apikey)")
+with st.sidebar:
+    st.markdown("### 🕯️ 1. Configuração")
+    nova_chave = st.text_input(
+        "Chave Google Gemini (Opcional):",
+        value=st.session_state.api_key_mem,
+        type="password",
+        placeholder="Cole sua nova chave AIza... (ou deixe vazio)",
+        help="O aplicativo já possui o Oráculo Interno dos 22 Arcanos integrado! Mesmo sem chave (ou se sua chave anterior foi bloqueada), ele funciona 100% gratuito."
+    )
+    st.session_state.api_key_mem = nova_chave.strip()
+
+    st.markdown("[🔑 Gerar Nova Chave no Google AI Studio](https://aistudio.google.com/apikey)")
+    st.caption("💡 *Dica: Nunca cole sua chave em prints públicos ou códigos do GitHub, pois o Google bloqueia chaves expostas automaticamente.*")
     st.divider()
 
     st.markdown("### ⚜️ Motor de Renderização")
     motor_escolhido = st.radio(
-        "Selecione o Motor Alquímico:",
+        "Selecione o Motor:",
         [
             "🆓 Motor 2.5D Papiro & Luz de Velas (100% Gratuito)",
-            "💎 Google Veo 2.0 Cloud (Requer API com Faturamento)"
+            "💎 Google Veo 2.0 Cloud (Requer API Paga)"
         ],
         index=0
     )
@@ -694,12 +709,12 @@ with st.sidebar:
     st.divider()
     st.markdown("### 📜 Status do Sistema")
     if nova_chave:
-        st.success("✅ Oráculo IA Conectado (Gemini 3.0 Flash)")
+        st.success("✅ Chave Gemini Inserida + Oráculo Interno Ativo")
     else:
-        st.warning("⚠️ Insira sua Chave Gratuita acima")
+        st.info("✅ Oráculo Interno Iniciático Ativo (Modo Gratuito Sem Chave)")
 
     if verificar_ffmpeg():
-        st.success("✅ FFmpeg Ativo (Loop + Trilha Sonora)")
+        st.success("✅ FFmpeg Ativo (Loop + Áudio)")
     else:
         st.warning("⚠️ FFmpeg não detectado")
 
@@ -711,87 +726,119 @@ if "nome_arquivo" not in st.session_state:
     st.session_state.nome_arquivo = "arcano_tarot"
 if "arquivos_drive" not in st.session_state:
     st.session_state.arquivos_drive = []
+if "indice_carta_selecionada" not in st.session_state:
+    st.session_state.indice_carta_selecionada = 0
 if "duracao_total" not in st.session_state:
     st.session_state.duracao_total = 20
 
-col_esq, col_dir = st.columns([1, 1.2], gap="large")
+col_esq, col_dir = st.columns([1.05, 1.15], gap="large")
 
 with col_esq:
-    st.subheader("📜 Passo 1: A Carta e o Ritual")
+    st.subheader("📜 Passo 1: Escolha a Carta")
     metodo_entrada = st.radio(
-        "Origem da lâmina do Tarô:",
-        ["📂 Enviar arquivo do dispositivo (.tif, .png, .jpg)", "☁️ Colar Link do Google Drive (Pasta ou Arquivo)"],
+        "Como deseja carregar a carta?",
+        ["☁️ Pasta ou Link do Google Drive (Com Galeria de Pré-visualização)", "📂 Enviar arquivo do computador (.tif, .png, .jpg)"],
         horizontal=False
     )
 
     if "Enviar arquivo" in metodo_entrada:
-        upload = st.file_uploader("Deposite a imagem da carta sobre a mesa:", type=["tif", "tiff", "png", "jpg", "jpeg", "webp"])
+        upload = st.file_uploader("Selecione ou arraste a imagem da carta:", type=["tif", "tiff", "png", "jpg", "jpeg", "webp"])
         if upload:
             imagem_carregada = Image.open(upload)
             st.session_state.nome_arquivo = Path(upload.name).stem
             st.session_state.img_bytes = converter_imagem_para_png_bytes(imagem_carregada)
     else:
-        url_drive = st.text_input("Link da pasta ou arquivo do Google Drive:")
-        if st.button("🔄 Sincronizar Lâminas do Google Drive"):
+        url_drive = st.text_input(
+            "Cole o link da pasta do Google Drive:",
+            value="https://drive.google.com/drive/folders/1CQRc6NEsmsvmN61ANtTtnhAGJXR74h64"
+        )
+        if st.button("🔄 Carregar Galeria de Cartas do Drive", use_container_width=True):
             if not url_drive:
                 st.error("Cole um link válido do Google Drive.")
             else:
-                with st.spinner("Consultando acervo de lâminas no Google Drive..."):
+                with st.spinner("Carregando lista e miniaturas das cartas..."):
                     try:
                         encontrados = listar_arquivos_pasta_drive(url_drive)
                         if encontrados:
                             st.session_state.arquivos_drive = encontrados
-                            st.success(f"{len(encontrados)} lâmina(s) localizada(s)!")
+                            st.session_state.indice_carta_selecionada = 0
+                            st.success(f"✅ {len(encontrados)} cartas carregadas! Veja as miniaturas abaixo ou escolha na lista.")
                         else:
                             st.error("Nenhuma imagem encontrada. Verifique se a pasta está pública ('Qualquer pessoa com o link').")
                     except Exception as err_dl:
                         st.error(f"Erro ao acessar link do Drive: {err_dl}")
 
         if st.session_state.arquivos_drive:
-            opcoes = {item["name"]: item for item in st.session_state.arquivos_drive}
-            escolhido_nome = st.selectbox("Escolha a lâmina do Arcano:", list(opcoes.keys()))
-            item_escolhido = opcoes[escolhido_nome]
-            with st.spinner(f"Preparando papiro de {escolhido_nome}..."):
+            # 1. Galeria Visual de Miniaturas (Expansível para escolher vendo a imagem!)
+            with st.expander("🖼️ Galeria Visual de Pré-visualização (Clique na carta desejada)", expanded=True):
+                st.caption("Visualize todas as cartas da pasta antes de selecionar:")
+                cols_grid = st.columns(4)
+                for idx, item in enumerate(st.session_state.arquivos_drive):
+                    with cols_grid[idx % 4]:
+                        st.image(item["thumb_url"], use_container_width=True)
+                        titulo_curto = CATALOGO_ARCANOS[idx]["num"] + " - " + CATALOGO_ARCANOS[idx]["nome"].split("(")[0].strip() if idx < 22 else item["name"]
+                        if st.button(f"✓ {titulo_curto}", key=f"btn_gal_{idx}", use_container_width=True):
+                            st.session_state.indice_carta_selecionada = idx
+
+            # 2. Selectbox sincronizado com a Galeria
+            labels_opcoes = [item["label"] for item in st.session_state.arquivos_drive]
+            idx_escolhido = st.selectbox(
+                "Ou selecione pelo nome na lista:",
+                range(len(labels_opcoes)),
+                index=st.session_state.indice_carta_selecionada,
+                format_func=lambda i: labels_opcoes[i]
+            )
+            st.session_state.indice_carta_selecionada = idx_escolhido
+            item_escolhido = st.session_state.arquivos_drive[idx_escolhido]
+
+            with st.spinner(f"Carregando {item_escolhido['label']} em alta definição..."):
                 try:
-                    caminho_escolhido = baixar_carta_individual_drive(item_escolhido)
-                    imagem_carregada = Image.open(caminho_escolhido)
-                    st.session_state.nome_arquivo = Path(escolhido_nome).stem
-                    st.session_state.img_bytes = converter_imagem_para_png_bytes(imagem_carregada)
+                    st.session_state.img_bytes = baixar_bytes_carta_drive(item_escolhido["id"], item_escolhido["name"])
+                    st.session_state.nome_arquivo = Path(item_escolhido["name"]).stem
                 except Exception as err_card:
                     st.error(f"Erro ao carregar a carta selecionada: {err_card}")
 
     if st.session_state.img_bytes:
-        st.image(st.session_state.img_bytes, caption=f"Lâmina Selecionada: {st.session_state.nome_arquivo}", use_container_width=True)
+        st.markdown("#### 🔍 Pré-visualização da Carta Selecionada")
+        col_img_preview, _ = st.columns([1.2, 0.8])
+        with col_img_preview:
+            st.image(st.session_state.img_bytes, caption=f"Arquivo: {st.session_state.nome_arquivo}", use_container_width=True)
 
     ideia_custom = st.text_area(
-        "✒️ Diretriz para o Vídeo (ou deixe em branco para seguir o ritual 2.5D padrão):",
-        placeholder="Ex: Quero um vídeo de 20s, no estilo do vídeo referência, com atmosfera de papiro antigo e luz de velas.",
-        height=90
+        "✒️ Diretriz para o Vídeo (Opcional):",
+        placeholder="Ex: Quero um vídeo de 20s, no estilo do vídeo referência.",
+        height=80
     )
 
     if st.button("🔍 Analisar Arcano e Estruturar Camadas 2.5D", type="primary", use_container_width=True):
-        if not nova_chave:
-            st.error("⚠️ Insira sua Chave Gratuita do Gemini na barra lateral esquerda primeiro.")
-        elif not st.session_state.img_bytes:
-            st.error("⚠️ Selecione ou envie uma carta primeiro.")
+        if not st.session_state.img_bytes:
+            st.error("⚠️ Primeiro carregue a pasta do Drive ou envie uma imagem.")
         else:
-            with st.spinner("🕯️ O Agente está decifrando o simbolismo do Arcano e mapeando os planos de profundidade..."):
+            with st.spinner("🕯️ Estruturando camadas de profundidade e simbolismo do Arcano..."):
                 try:
                     pedido = ideia_custom.strip() or "Construir vídeo de 20s em estilo 2.5D cutout parallax com estética de papiro antigo, luz de velas, órbita 360 e diagrama celestial no céu."
                     st.session_state.duracao_total = extrair_duracao_segundos(pedido, padrao=20)
-                    st.session_state.plano_ia = diagnosticar_carta_ia(nova_chave, st.session_state.img_bytes, pedido)
+                    st.session_state.plano_ia = diagnosticar_carta_ia(
+                        st.session_state.api_key_mem,
+                        st.session_state.img_bytes,
+                        pedido,
+                        arcano_idx=st.session_state.indice_carta_selecionada
+                    )
                 except Exception as e:
                     st.error(f"Erro ao analisar carta: {e}")
 
 with col_dir:
-    st.subheader("🎬 Passo 2: Alquimia de Cena & Renderização")
+    st.subheader("🎬 Passo 2: Revisão & Renderização")
 
     if not st.session_state.plano_ia:
-        st.info("👈 Selecione uma lâmina ao lado e clique em **Analisar Arcano** para revelar os planos de profundidade e o diagrama celestial.")
+        st.info("👈 Escolha uma carta na Galeria ao lado e clique em **Analisar Arcano** para preparar as camadas 2.5D.")
     else:
         plano = st.session_state.plano_ia
-        modelo_usado = plano.get("_modelo_usado", "gemini-3.0-flash")
-        st.success(f"✦ **Arcano Decifrado ({modelo_usado}):** {plano.get('arcano_nome', 'Arcano Maior')}")
+        if plano.get("_aviso_chave"):
+            st.warning(plano["_aviso_chave"])
+
+        modelo_usado = plano.get("_modelo_usado", "Oráculo IA")
+        st.success(f"✦ **Carta Estruturada ({modelo_usado}):** {plano.get('arcano_nome', 'Arcano Maior')}")
 
         with st.expander("📐 Camadas em Papiro 2.5D & Simbolismo (Editável)", expanded=True):
             camadas = plano.get("camadas_z_space", {})
@@ -802,10 +849,10 @@ with col_dir:
             astro = st.text_input("🌌 Revelação no Diagrama Celestial (Tilt-up):", value=plano.get("astro_revelacao_ceu", ""))
             simbolo_uni = st.text_input("✡️ Glifo / Símbolo Hermético no Topo:", value=plano.get("simbolo_unicode", "✦"))
 
-        with st.expander("⏱️ Tempo de Ritual, Música & Loop Infinito", expanded=True):
+        with st.expander("⏱️ Duração, Música & Loop Infinito", expanded=True):
             duracao_escolhida = st.slider("Duração total do vídeo final (segundos):", min_value=8, max_value=30, value=int(st.session_state.duracao_total), step=2)
-            audio_upload = st.file_uploader("Adicionar trilha sonora ritualística (.mp3 / .wav):", type=["mp3", "wav", "m4a"])
-            aplicar_loop_reverso = st.checkbox("Ciclo Hermético Perfeito (Como Acima, Assim Abaixo: vai ao céu e retorna suavemente à carta 2D)", value=True)
+            audio_upload = st.file_uploader("Adicionar música de fundo (.mp3 / .wav):", type=["mp3", "wav", "m4a"])
+            aplicar_loop_reverso = st.checkbox("Ciclo Hermético Perfeito (Vai ao céu e retorna suavemente à carta 2D)", value=True)
 
         plano["astro_revelacao_ceu"] = astro
         plano["simbolo_unicode"] = simbolo_uni
@@ -817,10 +864,10 @@ with col_dir:
                 f"Foreground: {c1}. Midground: {c2}. Background: {c3}. "
                 f"Particles: {particulas}. Sky reveal: {astro}."
             ),
-            height=95
+            height=85
         )
 
-        if st.button("🚀 FORJAR VÍDEO DO ARCANO AGORA", type="primary", use_container_width=True):
+        if st.button("🚀 GERAR VÍDEO DO ARCANO AGORA", type="primary", use_container_width=True):
             barra = st.progress(5)
             status_txt = st.empty()
 
@@ -845,14 +892,14 @@ with col_dir:
                         duracao_s=duracao_ida
                     )
                 else:
-                    ok = renderizar_video_veo(nova_chave, st.session_state.img_bytes, prompt_tecnico, raw_mp4, barra, status_txt)
+                    ok = renderizar_video_veo(st.session_state.api_key_mem, st.session_state.img_bytes, prompt_tecnico, raw_mp4, barra, status_txt)
 
                 if ok:
                     barra.progress(90)
-                    status_txt.info(f"🎞️ Selando ciclo reverso ({duracao_escolhida}s) e mixagem de áudio via FFmpeg...")
+                    status_txt.info(f"🎞️ Finalizando ciclo reverso ({duracao_escolhida}s) e mixagem de áudio via FFmpeg...")
                     pos_producao_loop_e_audio(raw_mp4, caminho_audio_temp, final_mp4, aplicar_loop_reverso)
                     barra.progress(100)
-                    status_txt.success(f"✦ Vídeo Concluído ({duracao_escolhida}s)! Assista abaixo ou baixe o arquivo final.")
+                    status_txt.success(f"✦ Vídeo Concluído ({duracao_escolhida}s)! Assista abaixo ou clique para baixar.")
 
                     video_bytes = final_mp4.read_bytes()
                     st.video(video_bytes)
