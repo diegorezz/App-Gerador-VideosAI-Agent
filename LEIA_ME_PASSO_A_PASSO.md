@@ -65,5 +65,6 @@ O arquivo `motor_jornada.py` precisa ficar **na mesma pasta do `app.py`** (se vo
 
 * **Sem chave Gemini:** recortes reais da carta + transições locais (rascunho, custo zero).
 * **Com chave Gemini:** o Gemini lê a sua carta, escreve o roteiro e pinta as cenas no estilo dela.
-* **Com chave + "Animar com Veo 3.1" (pago):** cada transição vira um "morph" feito por IA entre duas cenas — é o efeito do Vídeo Modelo.
+* **Magic Hour (créditos grátis do cadastro, 480p):** cada transição vira um "morph" feito por IA entre duas cenas. Crie a chave em magichour.ai/developer.
+* **Veo 3.1 (pago, melhor qualidade):** mesmo princípio, com a chave Gemini.
 * O vídeo termina na própria carta (loop perfeito), por isso o "reverse" espelhado foi desligado neste motor.

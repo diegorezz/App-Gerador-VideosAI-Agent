@@ -670,6 +670,87 @@ def animar_com_veo(client, types, pares: list[dict], modelo: str, seg: int, reso
 animar_com_veo.ultimos_erros = {}
 
 
+
+# ──────────────────────────────────────────────────────────────────────────────
+# MAGIC HOUR (créditos grátis ao cadastrar): quadro inicial + quadro final
+# ──────────────────────────────────────────────────────────────────────────────
+MODELO_MH_PADRAO = "ltx-2.5"     # a doc lista quadro final em 480p para este modelo
+RESOLUCAO_MH_PADRAO = "480p"
+
+
+def animar_com_magichour(token: str, pares: list[dict], modelo: str, seg: int, resolucao: str,
+                         pasta: Path, ritmo: float, barra=None, status=None, base_pct=40, faixa_pct=45) -> dict[int, Path]:
+    """Mesmo contrato de animar_com_veo: devolve {i: caminho} só dos clipes que deram certo."""
+    from magic_hour import Client
+
+    mh = Client(token=token.strip())
+    erros: dict[int, str] = {}
+    jobs: dict[int, str] = {}
+    for n, par in enumerate(pares):
+        i = par["i"]
+        _s(status, f"🎬 Enviando transição {n + 1}/{len(pares)} ao Magic Hour...")
+        try:
+            p_ini, p_fim = pasta / f"mh_ini_{i}.png", pasta / f"mh_fim_{i}.png"
+            _cover(par["ini"], W, H).save(p_ini)
+            _cover(par["fim"], W, H).save(p_fim)
+            up_ini = mh.v1.files.upload_file(file=str(p_ini))
+            up_fim = mh.v1.files.upload_file(file=str(p_fim))
+            kwargs = dict(
+                assets={"image_file_path": up_ini, "end_image_file_path": up_fim},
+                end_seconds=float(seg),
+                resolution=resolucao,
+                style={"prompt": par["prompt"][:1900]},
+                name=f"jornada_{i}",
+            )
+            if modelo and modelo != "default":
+                kwargs["model"] = modelo
+            jobs[i] = mh.v1.image_to_video.create(**kwargs).id
+        except Exception as e:
+            erros[i] = str(e)[:300]
+
+    prontos: dict[int, Path] = {}
+    pendentes = dict(jobs)
+    t0 = time.time()
+    while pendentes and time.time() - t0 < 60 * 12:
+        for i in list(pendentes):
+            try:
+                st_ = mh.v1.video_projects.get(id=pendentes[i])
+                if st_.status not in ("complete", "error", "canceled"):
+                    continue
+                jid = pendentes.pop(i)
+                if st_.status != "complete":
+                    erros[i] = f"Magic Hour: {st_.status} ({getattr(st_, 'error', '') or ''})"
+                    continue
+                sub = pasta / f"mh_{i}"
+                sub.mkdir(exist_ok=True)
+                res = mh.v1.video_projects.check_result(
+                    id=jid, wait_for_completion=True, download_outputs=True, download_directory=str(sub))
+                caminhos = [Path(x) for x in (getattr(res, "downloaded_paths", None) or [])]
+                mp4 = next((x for x in caminhos if x.suffix.lower() in (".mp4", ".mov", ".webm")), None)
+                if mp4 is None:
+                    erros[i] = "Magic Hour terminou, mas não devolveu arquivo de vídeo"
+                    continue
+                dest = pasta / f"clipe_{i}.mp4"
+                if _normalizar_clipe(mp4, dest, ritmo):
+                    prontos[i] = dest
+                else:
+                    erros[i] = "FFmpeg não conseguiu padronizar o clipe do Magic Hour"
+            except Exception as e:
+                erros[i] = str(e)[:300]
+                pendentes.pop(i, None)
+        feitos = len(jobs) - len(pendentes)
+        _p(barra, base_pct + faixa_pct * (feitos / max(1, len(jobs))))
+        _s(status, f"⏳ Magic Hour renderizando na nuvem: {feitos}/{len(jobs)} transições prontas...")
+        if pendentes:
+            time.sleep(6)
+    for i in pendentes:
+        erros[i] = "tempo esgotado esperando o Magic Hour"
+    animar_com_magichour.ultimos_erros = erros
+    return prontos
+
+
+animar_com_magichour.ultimos_erros = {}
+
 # ──────────────────────────────────────────────────────────────────────────────
 # API PÚBLICA — usada pelo app.py
 # ──────────────────────────────────────────────────────────────────────────────
@@ -733,6 +814,8 @@ def animar_jornada(
     jornada: dict, saida_raw: Path, *, api_key: str = "", usar_veo: bool = False,
     modelo_veo: str = MODELO_VEO_PADRAO, seg_por_clip: int = 6, resolucao: str = "720p",
     ritmo: float = 1.0, pasta_temp: Path | None = None, barra=None, status=None,
+    provedor: str = "", chave_magichour: str = "", modelo_mh: str = MODELO_MH_PADRAO,
+    resolucao_mh: str = RESOLUCAO_MH_PADRAO,
 ) -> dict:
     """Etapa cara: anima cada par de keyframes (Veo ou local) e monta o vídeo final. Retorna um relatório."""
     pasta = Path(pasta_temp or "./workspace_temp")
@@ -744,26 +827,34 @@ def animar_jornada(
     rng = random.Random(jornada.get("seed", 1))
     titulos = ["a carta"] + [c.get("titulo", "cena") for c in cenas] + ["a carta"]
     relatorio = {"ok": False, "clipes": [], "erros": {}}
-    if not (api_key and len(api_key.strip()) > 10):
-        usar_veo = False
+    if not provedor:                       # compatibilidade com a chamada antiga
+        provedor = "veo" if usar_veo else "local"
+    if provedor == "veo" and not (api_key and len(api_key.strip()) > 10):
+        provedor = "local"
+    if provedor == "magichour" and not (chave_magichour and len(chave_magichour.strip()) > 10):
+        provedor = "local"
 
     clipes: dict[int, Path] = {}
     origem_clipe: dict[int, str] = {}
 
-    if usar_veo:
-        from google import genai
-        from google.genai import types
-        client = genai.Client(api_key=api_key.strip())
+    if provedor in ("veo", "magichour"):
         pares = []
         for i in range(n_clips):
             t = trans[min(i, len(trans) - 1)]
             pares.append({"i": i, "ini": kfs[i], "fim": kfs[i + 1],
                           "prompt": _prompt_veo(t.get("movimento", ""), titulos[i], titulos[i + 1])})
-        feitos = animar_com_veo(client, types, pares, modelo_veo, seg_por_clip, resolucao, pasta, ritmo, barra, status)
+        if provedor == "veo":
+            from google import genai
+            from google.genai import types
+            client = genai.Client(api_key=api_key.strip())
+            feitos = animar_com_veo(client, types, pares, modelo_veo, seg_por_clip, resolucao, pasta, ritmo, barra, status)
+            relatorio["erros"] = dict(animar_com_veo.ultimos_erros)
+        else:
+            feitos = animar_com_magichour(chave_magichour, pares, modelo_mh, seg_por_clip, resolucao_mh, pasta, ritmo, barra, status)
+            relatorio["erros"] = dict(animar_com_magichour.ultimos_erros)
         for i, p in feitos.items():
             clipes[i] = p
-            origem_clipe[i] = "veo"
-        relatorio["erros"] = dict(animar_com_veo.ultimos_erros)
+            origem_clipe[i] = provedor
 
     for i in range(n_clips):
         if i in clipes:
