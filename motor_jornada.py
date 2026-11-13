@@ -754,13 +754,34 @@ animar_com_magichour.ultimos_erros = {}
 # ──────────────────────────────────────────────────────────────────────────────
 # API PÚBLICA — usada pelo app.py
 # ──────────────────────────────────────────────────────────────────────────────
+def _keyframe_pollinations_gratuito(prompt_cena: str, seed: int) -> Image.Image | None:
+    """Gera gratuitamente uma cena vertical 9:16 no mesmo traço de xilogravura/ilustração da imagem original."""
+    import urllib.parse
+    import requests
+    estilo = (
+        "vintage woodcut tarot engraving illustration, bold black ink linework, crosshatching shading, "
+        "warm antique colors, full bleed vertical 9:16 scene, no borders, no text, cinematic lighting, "
+    )
+    q = urllib.parse.quote(estilo + prompt_cena)
+    url = f"https://image.pollinations.ai/prompt/{q}?width={W}&height={H}&seed={seed}&nologo=true&model=flux"
+    try:
+        r = requests.get(url, timeout=28)
+        if r.status_code == 200 and len(r.content) > 5000:
+            img = Image.open(io.BytesIO(r.content)).convert("RGB")
+            return _cover(img, int(W * 1.35), int(H * 1.35), Image.LANCZOS)
+    except Exception:
+        pass
+    return None
+
+
 def preparar_jornada(
-    img_bytes: bytes, plano: dict, *, nome: str = "carta", api_key: str = "", n_cenas: int = 3,
+    img_bytes: bytes, plano: dict, *, nome: str = "carta", api_key: str = "", n_cenas: int = 4,
     instrucao: str = "", usar_gemini_roteiro: bool = True, usar_gemini_imagens: bool = True,
+    usar_pollinations_gratuito: bool = True,
     modelos_texto: list[str] | None = None, modelos_imagem: list[str] | None = None,
     barra=None, status=None,
 ) -> dict:
-    """Etapa barata: escreve o roteiro e cria os keyframes (cenas). Mostre ao usuário ANTES de gastar com o Veo."""
+    """Prepara automaticamente o roteiro e os keyframes seguindo a estrutura do vídeo de referência."""
     carta = Image.open(io.BytesIO(img_bytes)).convert("RGB")
     seed = _seed_da_carta(img_bytes, nome)
     rng = random.Random(seed)
@@ -775,38 +796,49 @@ def preparar_jornada(
             client = types = None
 
     avisos: list[str] = []
-    _p(barra, 5)
-    _s(status, "📝 Escrevendo o roteiro de cenas a partir da sua carta...")
+    _p(barra, 12)
+    _s(status, "📝 Criando roteiro automático baseado no vídeo de referência...")
     roteiro = None
     if client and usar_gemini_roteiro:
         roteiro = roteiro_gemini(client, types, img_bytes, plano, n_cenas, instrucao, modelos_texto or MODELOS_TEXTO_PADRAO)
-        if roteiro is None:
-            avisos.append("Gemini não conseguiu escrever o roteiro; usei o roteiro local.")
     if roteiro is None:
         roteiro = roteiro_local(plano, n_cenas, rng)
+        cam = plano.get("camadas_z_space", {}) or {}
+        astro = plano.get("astro_revelacao_ceu", "glowing Saturn planet with rings in starry night sky")
+        prompts_padrao = [
+            f"dramatic close-up of {cam.get('plano_medio', 'central figure')}, fiery golden light and embers, {instrucao}",
+            f"360 angle view of {cam.get('plano_medio', 'central archetype')} in action, dark atmospheric background, {instrucao}",
+            f"detailed close-up of {cam.get('primeiro_plano', 'foreground elements')} and {cam.get('plano_fundo', 'environment')}, {instrucao}",
+            f"cosmic night sky above dark mountain peaks revealing giant {astro}, vintage engraving style, {instrucao}",
+        ]
+        for idx_c, c_item in enumerate(roteiro["cenas"]):
+            if not c_item.get("prompt_imagem"):
+                c_item["prompt_imagem"] = prompts_padrao[idx_c % len(prompts_padrao)]
 
     regioes = _regioes_de_interesse(carta, n_cenas)
     keyframes: list[Image.Image] = [_carta_para_keyframe(carta)]
-    origens = ["carta"]
+    origens = ["original"]
     anterior: Image.Image | None = keyframes[0]
+
     for i, cena in enumerate(roteiro["cenas"]):
-        _p(barra, 10 + 25 * (i / max(1, n_cenas)))
-        _s(status, f"🎨 Criando a cena {i + 1}/{n_cenas}: {cena.get('titulo', '')}")
+        _p(barra, 18 + int(22 * (i / max(1, n_cenas))))
+        _s(status, f"🎨 Gerando cena {i + 1}/{n_cenas}: {cena.get('titulo', '')}")
         kf = None
         if client and usar_gemini_imagens and cena.get("prompt_imagem"):
             kf = keyframe_gemini(client, types, img_bytes, anterior, cena["prompt_imagem"], modelos_imagem or MODELOS_IMAGEM_PADRAO)
-            if kf is None:
-                avisos.append(f"Cena {i + 1}: a IA de imagem falhou; usei um recorte real da carta.")
+        if kf is None and usar_pollinations_gratuito and i == n_cenas - 1 and cena.get("prompt_imagem"):
+            kf = _keyframe_pollinations_gratuito(cena["prompt_imagem"], seed + i * 101)
         if kf is None:
             kf = _keyframe_de_regiao(carta, regioes[i])
-            origens.append("recorte")
+            origens.append("recorte_hd")
         else:
-            origens.append("ia")
+            origens.append("ia_gratuita")
         keyframes.append(kf)
         anterior = kf
-    keyframes.append(_carta_para_keyframe(carta))  # volta à carta => loop perfeito
-    origens.append("carta")
-    _p(barra, 38)
+
+    keyframes.append(_carta_para_keyframe(carta))
+    origens.append("original")
+    _p(barra, 42)
     return {"roteiro": roteiro, "keyframes": keyframes, "origens": origens, "avisos": avisos, "seed": seed}
 
 
