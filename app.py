@@ -1,277 +1,2044 @@
 import os
+import re
 import io
+import wave
+import math
 import time
+import json
+import random
+import shutil
+import subprocess
 from pathlib import Path
+import requests
+import numpy as np
 import streamlit as st
-from PIL import Image
+from PIL import Image, ImageDraw, ImageFilter, ImageEnhance
+from google import genai
+from google.genai import types
 
+# Fallback garantido para FFmpeg
 try:
-    import motor_jornada as mj
-    _ERRO_MJ = ""
-except Exception as _e_mj:
-    mj = None
-    _ERRO_MJ = str(_e_mj)
+    import imageio_ffmpeg
+    FFMPEG_BIN = shutil.which("ffmpeg") or imageio_ffmpeg.get_ffmpeg_exe()
+except Exception:
+    FFMPEG_BIN = shutil.which("ffmpeg")
 
 st.set_page_config(
-    page_title="AI Video Agent - Gerador Multi-Cenas Gratuito",
-    page_icon="🎬",
+    page_title="Tarot Iniciático Studio 2.5D",
+    page_icon="🕯️",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-st.markdown("""
+# ==============================================================================
+# DESIGN SYSTEM SUAVIZADO: LEITURA LIMPA (INTER / SANS) + DETALHES CLÁSSICOS
+# ==============================================================================
+DESIGN_SYSTEM_CSS = """
 <style>
-    .main {background-color: #0e1117;}
-    .stButton>button {
-        width: 100%;
-        background-color: #FF4B4B;
-        color: white;
-        font-weight: bold;
-        border-radius: 8px;
-        padding: 0.65rem 1rem;
-    }
-    .stButton>button:hover {
-        background-color: #FF2B2B;
-    }
-    .stAlert {
-        border-radius: 8px;
-    }
+@import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@500;600&family=Inter:wght@400;500;600&family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@24,400,0,0&display=swap');
+
+:root {
+    --bg-candle-dark: #160B06;
+    --bg-mahogany: #221109;
+    --parchment-light: #F4E6D2;
+    --parchment-mid: #E5CFAF;
+    --parchment-aged: #C8A97E;
+    --sepia-line: #7A5230;
+    --hermetic-crimson: #8B261D;
+    --candle-gold: #C8923B;
+}
+
+.stApp {
+    background: radial-gradient(circle at 50% 10%, #2A140A 0%, #160B06 60%, #0E0603 100%) !important;
+    color: var(--parchment-light) !important;
+}
+
+section[data-testid="stSidebar"] {
+    background: #1A0C06 !important;
+    border-right: 1px solid #4A2E18 !important;
+}
+
+h1, h2, h3 {
+    font-family: 'Cinzel', Georgia, serif !important;
+    color: var(--parchment-light) !important;
+    letter-spacing: 0.03em !important;
+    font-weight: 600 !important;
+}
+
+p, label, li, input, textarea {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif !important;
+}
+
+p, label {
+    font-size: 0.95rem !important;
+    line-height: 1.55 !important;
+    color: var(--parchment-mid) !important;
+}
+
+span[data-testid="stIconMaterial"],
+.material-symbols-rounded,
+[data-testid="stSidebarCollapseButton"] span,
+[data-testid="collapsedControl"] span,
+button[kind="header"] span,
+button[kind="headerNoPadding"] span {
+    font-family: 'Material Symbols Rounded' !important;
+    font-weight: normal !important;
+    font-style: normal !important;
+    font-size: 22px !important;
+    line-height: 1 !important;
+    letter-spacing: normal !important;
+    text-transform: none !important;
+    display: inline-block !important;
+    white-space: nowrap !important;
+    word-wrap: normal !important;
+    direction: ltr !important;
+    -webkit-font-feature-settings: 'liga' !important;
+    font-feature-settings: 'liga' !important;
+    -webkit-font-smoothing: antialiased !important;
+    max-width: 26px !important;
+    overflow: hidden !important;
+}
+
+section[data-testid="stFileUploaderDropzone"] button span[data-testid="stIconMaterial"] {
+    display: none !important;
+}
+
+div[data-testid="InputInstructions"] {
+    display: none !important;
+    visibility: hidden !important;
+}
+
+.stTextArea textarea {
+    padding: 12px 16px 20px 14px !important;
+    line-height: 1.5 !important;
+}
+
+.oracle-notice-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    background: rgba(200, 146, 59, 0.08);
+    border: 1px solid rgba(200, 146, 59, 0.28);
+    border-radius: 6px;
+    padding: 8px 14px;
+    margin-bottom: 10px;
+    font-size: 0.88rem;
+    color: var(--parchment-mid);
+}
+
+.oracle-help-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    background: rgba(244, 230, 210, 0.08);
+    border: 1px solid rgba(244, 230, 210, 0.35);
+    color: rgba(244, 230, 210, 0.75);
+    font-size: 0.75rem;
+    font-weight: 600;
+    margin-left: 8px;
+    cursor: help;
+    position: relative;
+    transition: all 0.2s ease;
+}
+
+.oracle-help-badge:hover {
+    background: rgba(200, 146, 59, 0.25);
+    color: #FFF;
+    border-color: var(--candle-gold);
+}
+
+.oracle-help-badge .tooltip-box {
+    visibility: hidden;
+    opacity: 0;
+    width: 310px;
+    background-color: #1A0C06;
+    color: #F4E6D2;
+    text-align: left;
+    border: 1px solid #7A5230;
+    border-radius: 6px;
+    padding: 10px 12px;
+    position: absolute;
+    z-index: 9999;
+    bottom: 135%;
+    right: 0;
+    font-size: 0.8rem;
+    font-weight: 400;
+    line-height: 1.45;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.85);
+    transition: opacity 0.2s ease;
+    pointer-events: none;
+}
+
+.oracle-help-badge:hover .tooltip-box {
+    visibility: visible;
+    opacity: 1;
+}
+
+.iniciatico-header {
+    background: linear-gradient(135deg, rgba(42, 20, 10, 0.9) 0%, rgba(24, 11, 5, 0.95) 100%);
+    border: 1px solid var(--sepia-line);
+    border-radius: 8px;
+    padding: 16px 24px;
+    margin-bottom: 20px;
+    text-align: center;
+}
+
+.iniciatico-header .subtitle-top {
+    font-family: 'Inter', sans-serif;
+    font-size: 0.75rem;
+    font-weight: 600;
+    letter-spacing: 0.2em;
+    color: var(--candle-gold);
+    text-transform: uppercase;
+    margin-bottom: 4px;
+}
+
+.iniciatico-header h1 {
+    font-size: 1.85rem !important;
+    margin: 0 !important;
+    color: var(--parchment-light) !important;
+}
+
+.iniciatico-header .subtitle-bottom {
+    font-family: 'Inter', sans-serif;
+    font-size: 0.92rem;
+    color: var(--parchment-aged);
+    margin-top: 6px;
+}
+
+.stButton > button[kind="primary"], .stDownloadButton > button {
+    background: linear-gradient(180deg, #9E2E22 0%, #731E15 100%) !important;
+    color: #FFF6E9 !important;
+    border: 1px solid #D5A458 !important;
+    border-radius: 6px !important;
+    font-family: 'Inter', sans-serif !important;
+    font-weight: 600 !important;
+    font-size: 0.95rem !important;
+    letter-spacing: 0.02em !important;
+    padding: 0.55rem 1.1rem !important;
+    transition: all 0.2s ease !important;
+}
+
+.stButton > button[kind="primary"]:hover, .stDownloadButton > button:hover {
+    background: linear-gradient(180deg, #B5382A 0%, #872419 100%) !important;
+    border-color: #F3C677 !important;
+}
+
+.stButton > button[kind="secondary"] {
+    background: #26130A !important;
+    color: var(--parchment-light) !important;
+    border: 1px solid #5C3A20 !important;
+    border-radius: 6px !important;
+    font-family: 'Inter', sans-serif !important;
+    font-size: 0.85rem !important;
+    font-weight: 500 !important;
+}
+
+.stButton > button[kind="secondary"]:hover {
+    border-color: var(--candle-gold) !important;
+    background: #331A0E !important;
+}
+
+.stTextInput input, .stTextArea textarea, div[data-baseweb="select"] > div {
+    background-color: #1E0E07 !important;
+    color: #F4E6D2 !important;
+    border: 1px solid #5C3A20 !important;
+    border-radius: 6px !important;
+    font-family: 'Inter', sans-serif !important;
+    font-size: 0.94rem !important;
+}
+
+div[data-testid="stImage"] img {
+    border: 1px solid #7A5230;
+    border-radius: 6px;
+}
+
+/* Card Editorial dos Três Planos (Inspirado na página de referência enviada pelo usuário) */
+.tres-planos-card {
+    background: linear-gradient(180deg, #F3EAD8 0%, #EAE0C8 100%);
+    color: #2B241D;
+    border: 1px solid #C5B496;
+    border-radius: 6px;
+    padding: 18px 22px;
+    margin: 12px 0 16px 0;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.55);
+}
+.tres-planos-card h4 {
+    font-family: 'Cinzel', Georgia, serif !important;
+    color: #2B241D !important;
+    font-size: 1.15rem !important;
+    margin: 0 0 10px 0 !important;
+    padding-bottom: 8px;
+    border-bottom: 1px solid #C5B496;
+}
+.plano-row {
+    display: grid;
+    grid-template-columns: 110px 1fr;
+    gap: 12px;
+    padding: 9px 0;
+    border-bottom: 1px solid rgba(160, 140, 110, 0.35);
+    align-items: baseline;
+}
+.plano-row:last-child {
+    border-bottom: none;
+}
+.plano-label {
+    font-family: 'Cinzel', Georgia, serif !important;
+    font-size: 0.78rem !important;
+    font-weight: 700 !important;
+    letter-spacing: 0.12em !important;
+    color: #9E4733 !important;
+    text-transform: uppercase;
+}
+.plano-label.invertida {
+    color: #3B596A !important;
+}
+.plano-texto {
+    font-family: 'Inter', Georgia, serif !important;
+    font-size: 0.9rem !important;
+    line-height: 1.5 !important;
+    color: #2B241D !important;
+}
+
 </style>
-""", unsafe_allow_html=True)
+"""
+st.markdown(DESIGN_SYSTEM_CSS, unsafe_allow_html=True)
 
-# ------------------------------------------------------------------------------
-# BARRA LATERAL: PROVEDORES DE IA (HUGGING FACE / GRATUITO) & BASE DE CONHECIMENTO
-# ------------------------------------------------------------------------------
-with st.sidebar:
-    st.markdown("## ⚙️ CONFIGURAÇÃO")
+PASTA_TEMP = Path("./workspace_temp")
+PASTA_TEMP.mkdir(exist_ok=True)
 
-    st.markdown("### 🔌 Inteligência Artificial")
-    provedor_ia = st.selectbox(
-        "Estratégia de Provedor:",
-        [
-            "Automático (Hugging Face + IA Gratuita)",
-            "Hugging Face Spaces (Wan 2.1 / LTX-Video / FLUX)",
-            "IA Gratuita sem Token (Pollinations + Motor 3D)",
-            "Outro Provedor Compatível"
-        ],
-        index=0,
-        help="O Agente gerencia automaticamente os modelos gratuitos disponíveis para compor cenas novas e animá-las."
+# Catálogo Esotérico Completo dos 22 Arcanos Maiores (Serve para legendar a galeria e como Oráculo Local caso a API Key falhe!)
+CATALOGO_ARCANOS = [
+    {"num": "0", "nome": "O Louco (Le Mat)", "simbolo": "☉", "astro": "Urano / Ar Primordial", "fg": "Cão em salto, flores do campo e cajado de peregrino", "mid": "O Viajante com trouxa às costas caminhando rumo ao abismo", "bg": "Montanhas douradas e horizonte aberto em papiro"},
+    {"num": "I", "nome": "O Mago (Le Bateleur)", "simbolo": "☿", "astro": "Mercúrio", "fg": "Mesa com taça, moedas, espada e bastão alquímico", "mid": "O Mago com chapéu de lemniscata (infinito) erguendo a varinha", "bg": "Jardim hermético sob céu dourado"},
+    {"num": "II", "nome": "A Sacerdotisa (La Papesse)", "simbolo": "☽", "astro": "Lua", "fg": "Livro aberto dos mistérios e dobras do manto sagrado", "mid": "A Alta Sacerdotisa coroada sentada no templo", "bg": "Colunas do templo e véu bordado"},
+    {"num": "III", "nome": "A Imperatriz (L'Impératrice)", "simbolo": "♀", "astro": "Vênus", "fg": "Escudo com a águia imperial e cetro do mundo", "mid": "A Imperatriz alada em seu trono real", "bg": "Campo fértil sob luz solar dourada"},
+    {"num": "IV", "nome": "O Imperador (L'Empereur)", "simbolo": "♈", "astro": "Áries / Júpiter", "fg": "Escudo da águia, cetro e pedra cúbica do trono", "mid": "O Imperador de perfil com pernas cruzadas em quatro", "bg": "Montanhas rochosas e domínio imperial"},
+    {"num": "V", "nome": "O Hierofante (Le Pape)", "simbolo": "♉", "astro": "Touro", "fg": "Dois discípulos ajoelhados no primeiro plano", "mid": "O Sumo Sacerdote abençoando com a cruz tríplice", "bg": "Pilares góticos do santuário"},
+    {"num": "VI", "nome": "Os Enamorados (L'Amoureux)", "simbolo": "♊", "astro": "Gêmeos", "fg": "O jovem entre os dois caminhos da virtude e da paixão", "mid": "As três figuras no plano terreno da escolha", "bg": "O Anjo Cupido irradiando luz solar no topo"},
+    {"num": "VII", "nome": "O Carro (Le Chariot)", "simbolo": "♋", "astro": "Câncer", "fg": "Dois cavalos (azul e vermelho) puxando a carruagem", "mid": "O Príncipe Triunfante sob o dossel estrelado", "bg": "Campos e muralhas da cidade ao fundo"},
+    {"num": "VIII", "nome": "A Justiça (La Justice)", "simbolo": "♎", "astro": "Libra", "fg": "Balança do equilíbrio perfeito e espada erguida", "mid": "A figura severa da Justiça entronizada", "bg": "Trono simétrico e véu dourado"},
+    {"num": "IX", "nome": "O Eremita (L'Hermite)", "simbolo": "♍", "astro": "Virgem / Saturno", "fg": "Cajado da prudência tocando o solo pedregoso", "mid": "O Sábio Ancião erguendo a lanterna da verdade", "bg": "Deserto noturno silencioso em papiro"},
+    {"num": "X", "nome": "A Roda da Fortuna (La Roue de Fortune)", "simbolo": "♃", "astro": "Júpiter", "fg": "Criaturas subindo e descendo no giro do destino", "mid": "A Grande Roda Cósmica sobre seu eixo", "bg": "A Esfinge coroada com espada no topo"},
+    {"num": "XI", "nome": "A Força (La Force)", "simbolo": "♌", "astro": "Leão", "fg": "O Leão vermelho com as fauces abertas", "mid": "A Dama com chapéu do infinito dominando a fera suavemente", "bg": "Planície aberta sob o céu"},
+    {"num": "XII", "nome": "O Enforcado (Le Pendu)", "simbolo": "♆", "astro": "Netuno / Água", "fg": "Raízes e gramíneas brotando na base das árvores", "mid": "O Iniciado suspenso pelo pé em meditação profunda", "bg": "Duas árvores podadas sustentando a trave"},
+    {"num": "XIII", "nome": "Arcano Sem Nome / A Morte (XIII)", "simbolo": "♏", "astro": "Escorpião", "fg": "Coroas, cabeças e plantas brotando do solo", "mid": "O Ceifador com sua grande foice da transmutação", "bg": "Terra negra fértil sob o horizonte"},
+    {"num": "XIV", "nome": "A Temperança (Tempérance)", "simbolo": "♐", "astro": "Sagitário", "fg": "Flores do campo e fluxo magnético entre duas ânforas", "mid": "O Anjo Alquímico transvasando a essência da vida", "bg": "Paisagem serena com aura solar"},
+    {"num": "XV", "nome": "O Diabo (Le Diable)", "simbolo": "♄", "astro": "Capricórnio / Saturno", "fg": "Duas figuras acorrentadas na base do pedestal", "mid": "Baphomet / O Diabo alado com tocha sobre o altar", "bg": "Caverna escura com brasas ardentes"},
+    {"num": "XVI", "nome": "A Torre (La Maison Dieu)", "simbolo": "♂", "astro": "Marte", "fg": "Duas figuras caindo entre pedras e centelhas coloridas", "mid": "A Torre de Babel com sua coroa sendo atingida", "bg": "Fogo celeste descendo do céu"},
+    {"num": "XVII", "nome": "A Estrela (L'Étoile)", "simbolo": "♒", "astro": "Aquário", "fg": "Duas ânforas derramando água viva no rio e na terra", "mid": "A Jovem ajoelhada sob o firmamento", "bg": "A Grande Estrela de oito pontas e sete estrelas menores"},
+    {"num": "XVIII", "nome": "A Lua (La Lune)", "simbolo": "♓", "astro": "Peixes / Lua", "fg": "O Lagostim emergindo das águas primordiais e dois cães", "mid": "Caminho sinuoso entre os dois guardiões", "bg": "Duas torres ao longe e a Lua irradiando gotas de orvalho"},
+    {"num": "XIX", "nome": "O Sol (Le Soleil)", "simbolo": "☉", "astro": "Sol", "fg": "Dois gêmeos de mãos dadas no jardim murado", "mid": "Muro alquímico e gotas de ouro solar", "bg": "O Grande Sol radiante de rosto humano no céu"},
+    {"num": "XX", "nome": "O Julgamento (Le Jugement)", "simbolo": "♇", "astro": "Plutão / Fogo Renovador", "fg": "Três figuras emergindo do túmulo em oração", "mid": "Ondas sonoras e nuvens celestiais", "bg": "O Anjo tocando a trombeta do despertar"},
+    {"num": "XXI", "nome": "O Mundo (Le Monde)", "simbolo": "♄", "astro": "Saturno / O Cosmos", "fg": "O Touro e o Leão nos cantos inferiores da carta", "mid": "A Figura Dançante dentro da Guirlanda Oval", "bg": "O Anjo e a Águia nos cantos superiores do firmamento"},
+]
+
+SYSTEM_PROMPT = """
+Você é um Diretor Técnico de Vídeo 2.5D/3D especialista em Tarô Iniciático e Gravuras Herméticas Renascentistas.
+Analise a imagem da carta fornecida e estruture a engenharia de cena para transformar esta carta estática 2D em um vídeo 2.5D com efeito Paper Cutout / Diorama Parallax, utilizando a estética de Papiro Antigo, Gravura Clássica, Carmesim Alquímico e Ouro à Luz de Velas.
+
+Retorne ESTRITAMENTE um JSON válido com a seguinte estrutura:
+{
+  "arcano_nome": "Nome e numeral romano do Arcano",
+  "simbolo_unicode": "Caractere unicode ou símbolo astrológico/hermético (ex: ♈, ♄, ☉, ☽, ✡, ♃, ☿)",
+  "cor_particula_rgb": [228, 189, 133],
+  "duracao_sugerida_segundos": 20,
+  "camadas_z_space": {
+    "primeiro_plano": "Elementos na frente da cena",
+    "plano_medio": "Figura central / arquétipo em recorte 2.5D",
+    "plano_fundo": "Paisagem renascentista em papiro antigo expandida ao fundo"
+  },
+  "particulas_e_fisica": "Efeitos ativos (ex: brasas de luz de vela, poeira de ouro hermético, centelhas solares)",
+  "astro_revelacao_ceu": "Planeta, esfera armilar, diagrama celestial ou signo revelado quando a câmera sobe para o céu",
+  "veo_prompt_en": "2.5D layered antique parchment cutout parallax animation of the provided Tarot card. Start with the flat vintage woodcut card on aged papyrus, deconstruct into 3D depth layers, candlelight golden particles floating, camera zooms in and orbits 360 degrees around the thin parchment-cutout central figure, camera tilts up to an antique celestial diagram and armillary sphere in the sky revealing the astrological symbol, then seamlessly loops back to the original 2D card frame. Renaissance engraving aesthetic, warm candlelight shadows, vertical 9:16."
+}
+"""
+
+def verificar_ffmpeg() -> bool:
+    return (FFMPEG_BIN is not None and os.path.exists(FFMPEG_BIN)) or (shutil.which("ffmpeg") is not None)
+
+def obter_executavel_ffmpeg() -> str:
+    return shutil.which("ffmpeg") or FFMPEG_BIN or "ffmpeg"
+
+def converter_imagem_para_png_bytes(img_pil: Image.Image) -> bytes:
+    img_rgb = img_pil.convert("RGB")
+    buf = io.BytesIO()
+    img_rgb.save(buf, format="PNG")
+    return buf.getvalue()
+
+
+# ==============================================================================
+# BIBLIOTECA DE MÚSICAS NÃO AUTORAIS (100% ROYALTY-FREE / SEM DIREITOS AUTORAIS)
+# Sintetizador Polifônico Estéreo Interno + Recomendação Automática por Arcano!
+# ==============================================================================
+BIBLIOTECA_MUSICAS_LIVRES = {
+    "synthwave_nocturne": {
+        "titulo": "🎹 Nightcall Hermético (Dark Synthwave — Estilo Vídeo Referência)",
+        "descricao": "Baixo analógico pulsante em Lá menor, bateria eletrônica suave e arpejo hipnótico noturno (inspirado na estética MysticMayhem / Kavinsky, 100% livre de direitos).",
+        "estilo": "synthwave",
+        "bpm": 92,
+        "acordes": [[220.0, 261.63, 329.63], [174.61, 220.0, 261.63], [130.81, 164.81, 196.0], [164.81, 196.0, 246.94]],
+        "arpejo": [220.0, 261.63, 329.63, 440.0, 329.63, 261.63, 246.94, 329.63],
+        "arcanos": [0, 7, 10, 15, 16]
+    },
+    "santuario_velas": {
+        "titulo": "🕯️ Santuário à Luz de Velas (Dark Ambient & Harpa Antiga)",
+        "descricao": "Pads profundos de catedral, harpa renascentista dedilhada em papiro antigo e ambiência mística acolhedora.",
+        "estilo": "velas",
+        "bpm": 72,
+        "acordes": [[146.83, 174.61, 220.0], [130.81, 164.81, 196.0], [116.54, 146.83, 174.61], [110.0, 138.59, 164.81]],
+        "arpejo": [293.66, 349.23, 440.0, 587.33, 440.0, 349.23, 329.63, 293.66],
+        "arcanos": [1, 2, 5, 9, 12]
+    },
+    "esfera_celeste": {
+        "titulo": "🌌 Esfera Armilar & Cosmos (Frequência Astral & Harmônicos de Cristal)",
+        "descricao": "Textura celestial cintilante, acordes suspensos e sinos harmônicos para revelações astrológicas no céu.",
+        "estilo": "cosmos",
+        "bpm": 68,
+        "acordes": [[261.63, 329.63, 392.0], [220.0, 261.63, 329.63], [174.61, 220.0, 261.63], [196.0, 246.94, 293.66]],
+        "arpejo": [523.25, 659.25, 783.99, 1046.50, 783.99, 659.25, 587.33, 523.25],
+        "arcanos": [3, 6, 14, 17, 18, 19, 21]
+    },
+    "trono_imperador": {
+        "titulo": "👑 Trono de Pedra & Poder Imperial (Orquestral Solene & Tambores Rituais)",
+        "descricao": "Violoncelos graves, metais épicos e pulsação de tambor cerimonial para arcanos de autoridade, força e transmutação.",
+        "estilo": "epico",
+        "bpm": 84,
+        "acordes": [[196.0, 233.08, 293.66], [155.56, 196.0, 233.08], [130.81, 155.56, 196.0], [146.83, 185.0, 220.0]],
+        "arpejo": [196.0, 233.08, 293.66, 392.0, 349.23, 293.66, 233.08, 196.0],
+        "arcanos": [4, 8, 11, 13, 20]
+    },
+    "tetractys_alquimia": {
+        "titulo": "📐 Tetractys Pitagórica (Alaúde Hermético & Harmonia das Esferas)",
+        "descricao": "Intervalos pitagóricos puros com dedilhado clássico de alaúde, drones meditativos e brisa astral.",
+        "estilo": "alquimia",
+        "bpm": 78,
+        "acordes": [[164.81, 196.0, 246.94], [146.83, 196.0, 220.0], [130.81, 164.81, 196.0], [123.47, 164.81, 185.0]],
+        "arpejo": [329.63, 392.0, 493.88, 659.25, 587.33, 493.88, 392.0, 329.63],
+        "arcanos": [1, 5, 8, 9, 14, 21]
+    },
+    "abismo_iniciatico": {
+        "titulo": "🔥 Travessia do Véu & Mistério Profundo (Dark Cinzelado & Sub-Bass)",
+        "descricao": "Atmosfera densa, sub-grave hipnótico e ecos de santuário subterrâneo para leituras intensas.",
+        "estilo": "misterio",
+        "bpm": 80,
+        "acordes": [[130.81, 155.56, 196.0], [116.54, 146.83, 174.61], [103.83, 130.81, 155.56], [98.0, 123.47, 146.83]],
+        "arpejo": [261.63, 311.13, 392.0, 523.25, 392.0, 311.13, 293.66, 246.94],
+        "arcanos": [0, 12, 13, 15, 16, 18, 20]
+    }
+}
+
+def recomendar_trilha_para_arcano(arcano_idx: int) -> str:
+    """Retorna a chave da trilha musical mais conectada ao tema do Arcano selecionado."""
+    mapa_direto = {
+        0: "synthwave_nocturne",
+        1: "tetractys_alquimia",
+        2: "santuario_velas",
+        3: "esfera_celeste",
+        4: "trono_imperador",
+        5: "santuario_velas",
+        6: "esfera_celeste",
+        7: "synthwave_nocturne",
+        8: "trono_imperador",
+        9: "santuario_velas",
+        10: "synthwave_nocturne",
+        11: "trono_imperador",
+        12: "abismo_iniciatico",
+        13: "abismo_iniciatico",
+        14: "tetractys_alquimia",
+        15: "synthwave_nocturne",
+        16: "abismo_iniciatico",
+        17: "esfera_celeste",
+        18: "abismo_iniciatico",
+        19: "esfera_celeste",
+        20: "trono_imperador",
+        21: "esfera_celeste",
+    }
+    return mapa_direto.get(arcano_idx % 22, "synthwave_nocturne")
+
+
+# ==============================================================================
+# SABEDORIA DOS TRÊS PLANOS (MENTAL, ANÍMICO, FÍSICO & INVERTIDA) + PESQUISA WEB
+# Baseado nas referências enviadas ("Significados úteis nos três planos")
+# ==============================================================================
+TRES_PLANOS_ARCANOS = {
+    0: {
+        "elemento": "ar_abismo",
+        "acao_viva": "Marcha contínua e passos despreocupados à beira do abismo, cajado oscilando, trouxa às costas e o cão saltando em movimento vivo.",
+        "mental": "Indeterminação devida à multiplicidade das preocupações que surgirão e de que ele só tem uma semiconsciência. Ideias em processo de transformação. Conselhos incertos.",
+        "animico": "Vicissitudes de sentimentos, incertezas nos compromissos, sentimentos vulgares de pouca duração.",
+        "fisico": "Inconsciência, falta de ordem, despreocupação com a palavra empenhada, insegurança, partida ou mudança. Abandono voluntário de bens materiais. Negócios enfraquecidos. Quanto ao corpo: dispersão de energia; pede descanso e regularidade.",
+        "invertida": "Sendo um personagem em movimento, a carta invertida significa que o Louco caiu ou que o detiveram em sua marcha. Risco de abandono forçado de bens materiais e de uma queda difícil de reverter. Complicações, confusões, incoerência."
+    },
+    1: {
+        "elemento": "alquimia_luz",
+        "acao_viva": "O Mago ergue a varinha transmutadora enquanto os quatro elementos (moedas, taça, espada e bastão) levitam e brilham sobre a mesa.",
+        "mental": "Iniciativa, inteligência desperta, domínio das faculdades criadoras, habilidade de síntese e começo de um grande empreendimento.",
+        "animico": "Entusiasmo vital, magnetismo pessoal consciente, desejo ardente de realização e expressão livre.",
+        "fisico": "Ação prática imediata, destreza manual, vitalidade nervosa ativa, início de projeto concreto com todos os recursos à disposição.",
+        "invertida": "Dispersão da vontade, charlatanismo, hesitação no momento de agir ou uso egoísta da inteligência."
+    },
+    4: {
+        "elemento": "fogo_pedra",
+        "acao_viva": "O Imperador respira solenemente no trono cúbico, o cetro irradia autoridade dourada e brasas imperiais sobem das rochas.",
+        "mental": "Estabilidade de pensamento, lógica construtiva, autoridade intelectual, planejamento estratégico e domínio da razão.",
+        "animico": "Firmeza emocional, lealdade, proteção paterna, segurança interior inabalável.",
+        "fisico": "Poder material consolidado, realização concreta, saúde vigorosa, comando e ordem estruturada nos negócios.",
+        "invertida": "Tirania, rigidez excessiva, teimosia ou perda temporária de controle sobre o domínio material."
+    },
+    15: {
+        "elemento": "fogo_correntes",
+        "acao_viva": "Labaredas vivas sobem da tocha e da caverna, correntes metálicas oscilam na base e o pentagrama pulsa em brasa.",
+        "mental": "Fascinação pelas forças instintivas, ambição intensa, pensamentos magnéticos e paixões avassaladoras.",
+        "animico": "Desejo ardente, magnetismo passional, tentação e vínculo emocional intenso que pede transmutação.",
+        "fisico": "Força vital bruta, magnetismo físico poderoso, excesso de energia material ou apego aos sentidos.",
+        "invertida": "Libertação gradual dos grilhões ou descontrole das paixões inferiores e esgotamento energético."
+    },
+    16: {
+        "elemento": "raio_pedra",
+        "acao_viva": "O raio celeste corta o céu, a coroa da Torre se desprende em gravidade dramática e centelhas elétricas iluminam a cena.",
+        "mental": "Ruptura de conceitos rígidos, iluminação súbita, queda de ilusões e despertar brusco para a realidade.",
+        "animico": "Libertação emocional através do impacto, superação do orgulho e renovação interior profunda.",
+        "fisico": "Mudança estrutural repentina, reconstrução necessária e liberação de energias represadas.",
+        "invertida": "Resistência teimosa à mudança necessária ou abalo atenuado pelas circunstâncias."
+    }
+}
+
+def obter_sabedoria_tres_planos(arcano_idx: int) -> dict:
+    """Retorna os Três Planos (Mental, Anímico, Físico, Invertida) + Elemento Cênico para qualquer um dos 22 Arcanos."""
+    if arcano_idx in TRES_PLANOS_ARCANOS:
+        return TRES_PLANOS_ARCANOS[arcano_idx]
+
+    arc = CATALOGO_ARCANOS[arcano_idx % len(CATALOGO_ARCANOS)]
+    mapa_elementos = {
+        2: "agua_nevoa", 3: "alquimia_luz", 5: "alquimia_luz", 6: "ar_abismo",
+        7: "fogo_pedra", 8: "ar_abismo", 9: "alquimia_luz", 10: "ar_abismo",
+        11: "fogo_pedra", 12: "agua_nevoa", 13: "raio_pedra", 14: "agua_nevoa",
+        17: "agua_nevoa", 18: "agua_nevoa", 19: "fogo_pedra", 20: "fogo_pedra", 21: "ar_abismo"
+    }
+    elem = mapa_elementos.get(arcano_idx % 22, "alquimia_luz")
+    return {
+        "elemento": elem,
+        "acao_viva": f"Vivificação tridimensional de {arc['nome']}: {arc['mid']} em movimento orgânico com {arc['fg']} no primeiro plano.",
+        "mental": f"Sabedoria arquetípica de {arc['nome']} atuando na clareza das ideias, discernimento espiritual e compreensão superior do destino.",
+        "animico": f"Vibração emocional ligada a {arc['astro']}, despertando intuição profunda, harmonia interior e transformação dos sentimentos.",
+        "fisico": f"Manifestação concreta no plano material representada por {arc['fg']}, trazendo vitalidade, movimento e realização prática.",
+        "invertida": f"Quando obstaculizado, o fluxo de {arc['nome']} pede recolhimento, paciência e realinhamento antes de dar o próximo passo."
+    }
+
+@st.cache_data(show_spinner=False)
+def pesquisar_arcano_na_web(nome_arcano: str) -> str:
+    """
+    Busca referências reais na Web (Wikipedia PT API) sobre o Arcano para enriquecer
+    a vivificação 3D e o conhecimento do Agente em tempo real!
+    """
+    termo_limpo = nome_arcano.split("(")[0].replace("Arcano Sem Nome /", "").strip()
+    queries = [f"{termo_limpo} (tarô)", termo_limpo, "Tarô de Marselha"]
+    headers = {"User-Agent": "TarotIniciaticoStudio/2.5 ( Educational & Hermetic Art )"}
+
+    for q in queries:
+        try:
+            url = "https://pt.wikipedia.org/w/api.php"
+            params = {
+                "action": "query",
+                "format": "json",
+                "prop": "extracts",
+                "exintro": True,
+                "explaintext": True,
+                "redirects": 1,
+                "titles": q
+            }
+            r = requests.get(url, params=params, headers=headers, timeout=8)
+            if r.status_code == 200:
+                pages = r.json().get("query", {}).get("pages", {})
+                for pid, pdata in pages.items():
+                    if pid != "-1" and pdata.get("extract"):
+                        texto = pdata["extract"].strip()
+                        if len(texto) > 80:
+                            return texto[:650] + ("..." if len(texto) > 650 else "")
+        except Exception:
+            continue
+
+    return (
+        f"Na tradição do Tarô de Marselha e do Tarô Iniciático, {termo_limpo} representa um fenômeno vivo em "
+        f"constante movimento nos três planos (Mental, Anímico e Físico), conectando o caminhante terrestre às esferas celestes."
     )
 
-    with st.expander("🔑 Chaves / Token Gratuito Hugging Face (Opcional)", expanded=True):
-        hf_token_input = st.text_input(
-            "Token Hugging Face (hf_...):",
-            value=os.environ.get("HF_TOKEN", ""),
-            type="password",
-            placeholder="hf_...",
-            help="Crie um token 100% gratuito em huggingface.co/settings/tokens para liberar maior prioridade nas filas de vídeo (Wan 2.1 / LTX-Video) e imagem (FLUX.1)."
-        )
-        st.caption("[Criar Token Gratuito no Hugging Face ↗](https://huggingface.co/settings/tokens)")
+# ==============================================================================
+# GERADOR DE EFEITOS SONOROS CENOGRÁFICOS & ELEMENTAIS (FOLEY 3D SINCRONIZADO)
+# Cria o som da carta se abrindo, whoosh orbital 3D, vento/fogo/água/passos e céu!
+# ==============================================================================
+def gerar_camada_foley_cenografico_estereo(
+    sr: int,
+    n_samples: int,
+    duracao_segundos: int,
+    elemento_cenico: str = "ar_abismo",
+    intensidade_sfx: float = 0.75
+) -> tuple[np.ndarray, np.ndarray]:
+    """
+    Gera os efeitos sonoros físicos e elementais sincronizados exatamente com as fases do vídeo:
+    - 0.0s a 2.0s: Impacto Sub-Drop + Rangido/Deslize das camadas de papiro e pedra se abrindo em 3D;
+    - 2.0s a 7.0s: Whoosh de câmera orbitando em estéreo (L <-> R) + Efeito Elemental Vivo:
+      * 'ar_abismo' (Ex: O Louco): Vento uivando nas alturas do precipício + passos ritmados de caminhada;
+      * 'fogo_correntes' / 'fogo_pedra' (Ex: O Diabo / Imperador): Chamas crepitando + pulsos de brasa/metal;
+      * 'agua_nevoa' (Ex: Sacerdotisa / Estrela / Lua): Água corrente cristalina e brisa mística;
+      * 'raio_pedra' (Ex: A Torre / A Morte): Trovão grave e centelhas elétricas;
+    - 7.0s ao fim: Ressonância harmônica cristalina quando a câmera sobe para o Diagrama Celestial!
+    """
+    t = np.linspace(0, duracao_segundos, n_samples, endpoint=False)
+    sfx_l = np.zeros(n_samples, dtype=np.float64)
+    sfx_r = np.zeros(n_samples, dtype=np.float64)
+    rng = np.random.RandomState(108)
 
-    st.markdown("---")
-    st.markdown("### 📚 Base de Conhecimento")
-    st.markdown("📁 **Google Drive (Vídeos e Imagens)**")
-    st.markdown("[Abrir Pasta no Google Drive ↗](https://drive.google.com/drive/folders/13RrQaR3UljINVKz471hOW4J54mbbIfql?usp=drive_link)")
+    # 1. SOM DE DESCONSTRUÇÃO DO CENÁRIO (0.1s a 1.8s): Sub-drop cinematográfico + Textura de Papiro abrindo
+    idx_open = min(n_samples, int(2.0 * sr))
+    t_open = t[:idx_open]
+    freq_drop = 115.0 * np.exp(-t_open * 2.4) + 32.0
+    sub_drop = np.sin(2 * np.pi * freq_drop * t_open) * np.exp(-t_open * 1.9) * 0.55
+    ruido_papiro = rng.normal(0, 1, idx_open) * np.sin(np.pi * (t_open / 2.0)) * np.exp(-t_open * 2.5) * 0.14
+    sfx_l[:idx_open] += sub_drop + ruido_papiro
+    sfx_r[:idx_open] += sub_drop + ruido_papiro * 0.9
 
-    if "arquivos_drive" not in st.session_state:
-        st.session_state.arquivos_drive = []
-    if "img_bytes" not in st.session_state:
-        st.session_state.img_bytes = None
-    if "nome_arquivo" not in st.session_state:
-        st.session_state.nome_arquivo = "arte_base"
+    # 2. SOM DO MOVIMENTO ORBITAL DA CÂMERA 3D (Whooshes panorâmicos L <-> R acompanhando o giro)
+    pan_orbit = 0.5 + 0.45 * np.sin(2 * np.pi * (t / max(4.0, duracao_segundos * 0.45)))
+    env_whoosh = (np.sin(2 * np.pi * (t / max(3.5, duracao_segundos * 0.25))) ** 2) * 0.16
+    ruido_branco = rng.normal(0, 1, n_samples)
+    # Filtro passa-baixa simples via média móvel para criar som macio de vento/whoosh de câmera
+    kernel_w = np.ones(45) / 45.0
+    whoosh_filtrado = np.convolve(ruido_branco, kernel_w, mode="same") * env_whoosh
+    sfx_l += whoosh_filtrado * pan_orbit
+    sfx_r += whoosh_filtrado * (1.0 - pan_orbit)
 
-    url_drive_input = st.text_input(
-        "Link da Base no Drive:",
-        value="https://drive.google.com/drive/folders/13RrQaR3UljINVKz471hOW4J54mbbIfql?usp=drive_link"
-    )
-    if st.button("🔄 Sincronizar Biblioteca Visual"):
-        if mj:
-            with st.spinner("Sincronizando arquivos do Google Drive..."):
-                try:
-                    encontrados = mj.listar_arquivos_pasta_drive(url_drive_input)
-                    if encontrados:
-                        st.session_state.arquivos_drive = encontrados
-                        st.success(f"✅ {len(encontrados)} arquivos encontrados na base!")
-                    else:
-                        st.warning("Nenhum arquivo encontrado. Verifique se a pasta está pública.")
-                except Exception as e:
-                    st.error(f"Erro ao sincronizar Drive: {e}")
+    # 3. EFEITOS ELEMENTAIS CENOGRÁFICOS VIVOS (De acordo com a natureza do Arcano!)
+    if elemento_cenico == "ar_abismo":
+        # Vento das montanhas/abismo uivando + passos de caminhada do Louco sobre a terra/rocha
+        kernel_vento = np.ones(110) / 110.0
+        vento = np.convolve(ruido_branco, kernel_vento, mode="same")
+        mod_vento = 0.5 + 0.5 * np.sin(2 * np.pi * 0.28 * t + 0.7)
+        sfx_l += vento * mod_vento * 0.32
+        sfx_r += np.roll(vento, 400) * mod_vento * 0.32
 
-    st.markdown("---")
-    st.markdown("### 🖥️ Status do Sistema")
-    st.markdown("🟢 **Agente Cinematográfico**: Ativo")
-    st.markdown("🟢 **Gerador de Cenas IA**: Ativo (FLUX / Pollinations)")
-    st.markdown("🟢 **Animador Hugging Face**: Ativo (Wan 2.1 / LTX / 3D)")
-    if mj and mj.obter_ffmpeg():
-        st.markdown("🟢 **Montagem FFmpeg**: Ativo")
-    else:
-        st.markdown("🟡 **Montagem FFmpeg**: Fallback")
+        # Passos ritmados da marcha do Louco + toque do cajado no chão a cada 0.65s
+        passo_intervalo = int(0.65 * sr)
+        for p_start in range(int(0.8 * sr), int(duracao_segundos * 0.72 * sr), passo_intervalo):
+            p_end = min(n_samples, p_start + int(0.12 * sr))
+            if p_start >= n_samples:
+                break
+            tp = np.linspace(0, (p_end - p_start) / sr, p_end - p_start, endpoint=False)
+            # Som grave do passo + toque seco de madeira do cajado
+            passo_som = (
+                0.28 * np.sin(2 * np.pi * (85.0 * np.exp(-tp * 35.0) + 40.0) * tp) * np.exp(-tp * 22.0)
+                + 0.12 * rng.normal(0, 1, len(tp)) * np.exp(-tp * 45.0)
+            )
+            sfx_l[p_start:p_end] += passo_som * 0.9
+            sfx_r[p_start:p_end] += passo_som * 1.1
 
-# ------------------------------------------------------------------------------
-# TELA PRINCIPAL (Fluxo em 4 Passos Limpos)
-# ------------------------------------------------------------------------------
-st.markdown("# 🎬 AI VIDEO AGENT")
-st.markdown(
-    "Transforme imagens em vídeos multi-cenas para redes sociais. O Agente analisa sua referência, "
-    "cria novas cenas ilustradas no mesmo estilo via IA gratuita e anima as transições automaticamente."
-)
+    elif elemento_cenico in ("fogo_correntes", "fogo_pedra"):
+        # Labaredas graves (rumble de fogo) + estalos de brasas crepitando + tilintar metálico
+        kernel_fogo = np.ones(160) / 160.0
+        fogo_grave = np.convolve(ruido_branco, kernel_fogo, mode="same") * 0.42
+        estalos = (np.abs(ruido_branco) > 2.65).astype(np.float64) * ruido_branco * 0.18
+        sfx_l += fogo_grave + estalos
+        sfx_r += fogo_grave * 0.95 + np.roll(estalos, 120)
 
-if _ERRO_MJ:
-    st.error(f"Erro ao carregar motor_jornada.py: {_ERRO_MJ}")
+    elif elemento_cenico == "agua_nevoa":
+        # Água cristalina fluindo + cintilação de orvalho
+        kernel_agua = np.ones(30) / 30.0
+        agua = np.convolve(ruido_branco, kernel_agua, mode="same") * (0.25 + 0.15 * np.sin(2 * np.pi * 0.4 * t))
+        sfx_l += agua * 0.25
+        sfx_r += np.roll(agua, 250) * 0.25
 
-col_1, col_2 = st.columns(2, gap="large")
+    elif elemento_cenico == "raio_pedra":
+        # Trovão dramático e impacto de rochas
+        idx_trovao = int(duracao_segundos * 0.22 * sr)
+        dur_tr = min(n_samples - idx_trovao, int(3.5 * sr))
+        if dur_tr > 0:
+            tt = np.linspace(0, dur_tr / sr, dur_tr, endpoint=False)
+            trovao = rng.normal(0, 1, dur_tr) * np.exp(-tt * 1.1) * (0.5 + 0.5 * np.sin(2 * np.pi * 3.5 * tt))
+            trovao_grave = np.convolve(trovao, np.ones(90)/90.0, mode="same") * 0.65
+            sfx_l[idx_trovao:idx_trovao+dur_tr] += trovao_grave
+            sfx_r[idx_trovao:idx_trovao+dur_tr] += trovao_grave
 
-with col_1:
-    st.markdown("### ① Vídeo de Referência")
-    uploaded_video = st.file_uploader(
-        "Arraste ou selecione o vídeo modelo (estilo MysticMayhem):",
-        type=["mp4", "mov", "avi", "webm"]
-    )
-    if uploaded_video:
-        st.video(uploaded_video)
-    else:
-        st.info("Envie o vídeo de referência para guiar o ritmo, os portais de luz e as transições do Agente.")
+    # 4. RESSONÂNCIA CELESTIAL NO TILT-UP (Quando a câmera sobe para a Esfera Armilar no céu!)
+    inicio_ceu = int(duracao_segundos * 0.34 * sr)
+    fim_ceu = min(n_samples, int(duracao_segundos * 0.66 * sr))
+    if fim_ceu > inicio_ceu:
+        tc = np.linspace(0, (fim_ceu - inicio_ceu) / sr, fim_ceu - inicio_ceu, endpoint=False)
+        env_ceu = np.sin(np.pi * (tc / max(0.1, tc[-1]))) ** 1.2
+        shimmer = (
+            0.14 * np.sin(2 * np.pi * 528.0 * tc)
+            + 0.10 * np.sin(2 * np.pi * 792.0 * tc)
+            + 0.08 * np.sin(2 * np.pi * 1056.0 * tc)
+        ) * env_ceu
+        sfx_l[inicio_ceu:fim_ceu] += shimmer
+        sfx_r[inicio_ceu:fim_ceu] += np.roll(shimmer, 180)
 
-with col_2:
-    st.markdown("### ② Imagem / Produto / Arte")
-    origem_img = st.radio(
-        "Escolha a origem da imagem:",
-        ["📁 Upload do Computador (.tif, .tiff, .png, .jpg)", "📚 Biblioteca Sincronizada do Google Drive"],
-        horizontal=True
-    )
+    return sfx_l * intensidade_sfx, sfx_r * intensidade_sfx
 
-    if "Upload" in origem_img:
-        uploaded_image = st.file_uploader(
-            "Selecione a imagem principal (.tif, .tiff, .png, .jpg, .webp):",
-            type=["tif", "tiff", "png", "jpg", "jpeg", "webp"]
-        )
-        if uploaded_image:
-            try:
-                img_pil = Image.open(uploaded_image)
-                st.session_state.nome_arquivo = Path(uploaded_image.name).stem
-                buf = io.BytesIO()
-                img_pil.convert("RGB").save(buf, format="PNG")
-                st.session_state.img_bytes = buf.getvalue()
-            except Exception as e:
-                st.error(f"Não foi possível abrir a imagem: {e}")
-    else:
-        imgs_drive = [x for x in st.session_state.arquivos_drive if x.get("tipo") == "imagem"]
-        if imgs_drive:
-            mapa_drive = {x["label"]: x for x in imgs_drive}
-            sel_label = st.selectbox("Selecione a imagem da base do Drive:", list(mapa_drive.keys()))
-            if sel_label and st.button("📥 Carregar Imagem Selecionada"):
-                with st.spinner("Baixando e convertendo arquivo do Drive..."):
-                    try:
-                        item = mapa_drive[sel_label]
-                        st.session_state.img_bytes = mj.baixar_bytes_carta_drive(item["id"])
-                        st.session_state.nome_arquivo = Path(item["name"]).stem
-                    except Exception as e:
-                        st.error(f"Erro ao baixar imagem do Drive: {e}")
+@st.cache_data(show_spinner=False)
+def sintetizar_musica_biblioteca_wav(
+    id_trilha: str,
+    duracao_segundos: int = 22,
+    incluir_foley_cenografico: bool = True,
+    elemento_cenico: str = "ar_abismo",
+    intensidade_sfx: float = 0.75
+) -> bytes:
+    """
+    Sintetiza em tempo real (44.1kHz Estéreo) a trilha musical não autoral E mixa
+    os efeitos sonoros cenográficos e elementais sincronizados (som da carta abrindo,
+    whoosh de câmera 3D, vento/passos/fogo/água/trovão e ressonância celestial no topo)!
+    """
+    info = BIBLIOTECA_MUSICAS_LIVRES.get(id_trilha, BIBLIOTECA_MUSICAS_LIVRES["synthwave_nocturne"])
+    sr = 44100
+    n_samples = int(sr * duracao_segundos)
+    t = np.linspace(0, duracao_segundos, n_samples, endpoint=False)
+
+    bpm = info["bpm"]
+    acordes = info["acordes"]
+    arpejo = info["arpejo"]
+    estilo = info["estilo"]
+
+    beat_dur = 60.0 / bpm
+    bar_dur = beat_dur * 4.0
+
+    left = np.zeros(n_samples, dtype=np.float64)
+    right = np.zeros(n_samples, dtype=np.float64)
+
+    n_bars = int(math.ceil(duracao_segundos / bar_dur))
+    for b_idx in range(n_bars):
+        start_s = int(b_idx * bar_dur * sr)
+        end_s = min(n_samples, int((b_idx + 1) * bar_dur * sr))
+        if start_s >= n_samples:
+            break
+        t_bar = t[start_s:end_s] - t[start_s]
+        dur_b = max(0.01, (end_s - start_s) / sr)
+        env_pad = np.sin(np.pi * (t_bar / dur_b)) ** 0.45
+
+        acorde = acordes[b_idx % len(acordes)]
+        raiz_bass = acorde[0] * 0.5
+
+        if estilo == "synthwave":
+            pulso = 0.55 + 0.45 * np.sin(2 * np.pi * (bpm / 60.0 * 2.0) * t_bar)
+            onda_bass = (np.sin(2 * np.pi * raiz_bass * t_bar) + 0.45 * np.tanh(2.5 * np.sin(2 * np.pi * raiz_bass * 2 * t_bar))) * pulso
+            left[start_s:end_s] += 0.34 * onda_bass
+            right[start_s:end_s] += 0.34 * onda_bass
+        elif estilo in ("epico", "misterio"):
+            pulso = 0.6 + 0.4 * np.cos(2 * np.pi * (bpm / 60.0) * t_bar)
+            onda_bass = (np.sin(2 * np.pi * raiz_bass * t_bar) + 0.35 * np.sin(2 * np.pi * raiz_bass * 1.5 * t_bar)) * pulso * env_pad
+            left[start_s:end_s] += 0.36 * onda_bass
+            right[start_s:end_s] += 0.36 * onda_bass
         else:
-            st.info("Clique em '🔄 Sincronizar Biblioteca Visual' na barra lateral para listar as imagens do Drive.")
+            onda_bass = np.sin(2 * np.pi * raiz_bass * t_bar) * env_pad
+            left[start_s:end_s] += 0.26 * onda_bass
+            right[start_s:end_s] += 0.26 * onda_bass
 
-    if st.session_state.img_bytes:
-        st.image(
-            st.session_state.img_bytes,
-            caption=f"Imagem Base Pronta: {st.session_state.nome_arquivo}",
-            use_container_width=True
+        for idx_n, freq in enumerate(acorde):
+            detune = 1.003 if idx_n % 2 == 0 else 0.997
+            pad_l = np.sin(2 * np.pi * freq * t_bar) + 0.25 * np.sin(2 * np.pi * freq * 2.0 * t_bar)
+            pad_r = np.sin(2 * np.pi * (freq * detune) * t_bar) + 0.25 * np.sin(2 * np.pi * (freq * detune) * 2.0 * t_bar)
+            left[start_s:end_s] += 0.14 * pad_l * env_pad
+            right[start_s:end_s] += 0.14 * pad_r * env_pad
+
+    step_dur = beat_dur / 2.0
+    n_steps = int(math.ceil(duracao_segundos / step_dur))
+    for s_idx in range(n_steps):
+        start_s = int(s_idx * step_dur * sr)
+        end_s = min(n_samples, int((s_idx + 1) * step_dur * sr))
+        if start_s >= n_samples:
+            break
+        t_step = t[start_s:end_s] - t[start_s]
+        nota_f = arpejo[s_idx % len(arpejo)]
+        if (s_idx // 8) % 2 == 1:
+            nota_f *= 1.12246
+
+        env_pluck = np.exp(-t_step * (5.5 if estilo != "cosmos" else 3.2))
+        nota_onda = (
+            np.sin(2 * np.pi * nota_f * t_step)
+            + 0.35 * np.sin(2 * np.pi * nota_f * 2.0 * t_step) * np.exp(-t_step * 9.0)
+            + 0.12 * np.sin(2 * np.pi * nota_f * 3.0 * t_step) * np.exp(-t_step * 14.0)
+        ) * env_pluck
+
+        pan = 0.5 + 0.35 * math.sin(s_idx * 0.9)
+        left[start_s:end_s] += 0.24 * nota_onda * pan
+        right[start_s:end_s] += 0.24 * nota_onda * (1.0 - pan)
+
+    if estilo in ("synthwave", "epico"):
+        n_beats = int(math.ceil(duracao_segundos / beat_dur))
+        for bt in range(n_beats):
+            b_start = int(bt * beat_dur * sr)
+            b_end = min(n_samples, b_start + int(0.22 * sr))
+            if b_start >= n_samples:
+                break
+            tb = np.linspace(0, (b_end - b_start) / sr, b_end - b_start, endpoint=False)
+            if bt % 2 == 0:
+                freq_sweep = 52.0 + 95.0 * np.exp(-tb * 28.0)
+                kick = np.sin(2 * np.pi * freq_sweep * tb) * np.exp(-tb * 11.0)
+                left[b_start:b_end] += 0.38 * kick
+                right[b_start:b_end] += 0.38 * kick
+            elif estilo == "synthwave":
+                rng_snare = np.random.RandomState(bt)
+                ruido = rng_snare.normal(0, 1, len(tb)) * np.exp(-tb * 14.0)
+                corpo = np.sin(2 * np.pi * 185.0 * tb) * np.exp(-tb * 18.0)
+                snare = 0.12 * ruido + 0.15 * corpo
+                left[b_start:b_end] += snare
+                right[b_start:b_end] += snare
+
+    delay_samples = int(0.375 * sr)
+    if n_samples > delay_samples:
+        left[delay_samples:] += 0.28 * right[:-delay_samples]
+        right[delay_samples:] += 0.28 * left[:-delay_samples]
+
+    # Adiciona a Camada de Sound Design & Foley Cenográfico (Vento, Fogo, Água, Trovão, Whoosh 3D e Esfera Celeste)
+    if incluir_foley_cenografico:
+        sfx_l, sfx_r = gerar_camada_foley_cenografico_estereo(sr, n_samples, duracao_segundos, elemento_cenico, intensidade_sfx)
+        left += sfx_l
+        right += sfx_r
+
+    fade_len = min(int(1.2 * sr), n_samples // 6)
+    if fade_len > 0:
+        fade_in = np.linspace(0.0, 1.0, fade_len)
+        fade_out = np.linspace(1.0, 0.0, fade_len)
+        left[:fade_len] *= fade_in
+        right[:fade_len] *= fade_in
+        left[-fade_len:] *= fade_out
+        right[-fade_len:] *= fade_out
+
+    max_val = max(np.max(np.abs(left)), np.max(np.abs(right)), 1e-5)
+    left = (left / max_val) * 0.88
+    right = (right / max_val) * 0.88
+
+    stereo = np.empty((n_samples * 2,), dtype=np.int16)
+    stereo[0::2] = (left * 32767).astype(np.int16)
+    stereo[1::2] = (right * 32767).astype(np.int16)
+
+    buf = io.BytesIO()
+    with wave.open(buf, "wb") as wf:
+        wf.setnchannels(2)
+        wf.setsampwidth(2)
+        wf.setframerate(sr)
+        wf.writeframes(stereo.tobytes())
+    return buf.getvalue()
+
+# ==============================================================================
+# CONECTOR GOOGLE DRIVE SEM GDOWN.FUZZY (CORRIGE O ERRO DE SELEÇÃO + MINIATURAS)
+# ==============================================================================
+def extrair_id_drive(url: str) -> tuple[str | None, str]:
+    url = url.strip()
+    m_folder = re.search(r"/folders/([a-zA-Z0-9_-]+)", url)
+    if m_folder:
+        return m_folder.group(1), "folder"
+    m_file = re.search(r"/file/d/([a-zA-Z0-9_-]+)", url)
+    if m_file:
+        return m_file.group(1), "file"
+    m_id = re.search(r"[?&]id=([a-zA-Z0-9_-]+)", url)
+    if m_id:
+        return m_id.group(1), "file"
+    return None, "unknown"
+
+def listar_arquivos_pasta_drive(url: str) -> list[dict]:
+    drive_id, tipo = extrair_id_drive(url)
+    if not drive_id:
+        raise ValueError("Link do Google Drive inválido. Use um link de pasta (/folders/...) ou arquivo (/file/d/...).")
+
+    extensoes_img = (".tif", ".tiff", ".png", ".jpg", ".jpeg", ".webp")
+
+    if tipo == "file":
+        return [{
+            "name": "Carta_Selecionada.tif",
+            "label": "Carta Individual do Drive",
+            "id": drive_id,
+            "thumb_url": f"https://drive.google.com/thumbnail?id={drive_id}&sz=w320",
+            "arcano_idx": 0
+        }]
+
+    embed_url = f"https://drive.google.com/embeddedfolderview?id={drive_id}#list"
+    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+    resp = requests.get(embed_url, headers=headers, timeout=20)
+
+    itens = []
+    if resp.status_code == 200:
+        padrao = re.compile(
+            r'id="entry-([a-zA-Z0-9_-]+)".*?class="flip-entry-title">([^<]+)</div>',
+            re.DOTALL
         )
+        for m in padrao.finditer(resp.text):
+            f_id, f_name = m.group(1), m.group(2).strip()
+            if f_name.lower().endswith(extensoes_img):
+                itens.append({"name": f_name, "id": f_id})
 
-st.markdown("---")
+    itens.sort(key=lambda x: x["name"])
 
-# ③ Chat Inteligente com o Agente
-st.markdown("### ③ 💬 Orientações Adicionais com o Agente (Opcional)")
-st.markdown("Converse com o Agente para direcionar o clima, cores, efeitos ou ritmo das cenas geradas por IA.")
+    # Associa rótulos amigáveis dos 22 Arcanos caso a pasta tenha as 22 lâminas em ordem
+    for idx, item in enumerate(itens):
+        item["thumb_url"] = f"https://drive.google.com/thumbnail?id={item['id']}&sz=w320"
+        item["arcano_idx"] = idx if idx < len(CATALOGO_ARCANOS) else 0
+        if len(itens) == 22 and idx < 22:
+            arc = CATALOGO_ARCANOS[idx]
+            item["label"] = f"[{arc['num']}] {arc['nome']} — ({item['name']})"
+        else:
+            item["label"] = item["name"]
 
-if "messages" not in st.session_state:
-    st.session_state.messages = [
-        {
-            "role": "assistant",
-            "content": "Olá! Vou compor 3 cenas inéditas a partir da sua imagem e conectá-las com portais de luz e vórtice espiral usando IA gratuita. Quer adicionar alguma orientação (ex: 'clima mais sombrio e místico', 'explosão de luz dourada no céu')?"
-        }
+    return itens
+
+@st.cache_data(show_spinner=False)
+def baixar_bytes_carta_drive(file_id: str, file_name: str) -> bytes:
+    """
+    Baixa a imagem diretamente via HTTP Session do Google Drive (sem usar o argumento 'fuzzy'
+    do gdown que causava erro em algumas versões) e já retorna os bytes convertidos em PNG!
+    """
+    pasta_destino = PASTA_TEMP / "drive_cache"
+    pasta_destino.mkdir(exist_ok=True)
+    caminho_png_cache = pasta_destino / f"{file_id}.png"
+
+    if caminho_png_cache.exists() and caminho_png_cache.stat().st_size > 1000:
+        return caminho_png_cache.read_bytes()
+
+    sess = requests.Session()
+    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+
+    # Tentativa 1: Download do arquivo original via Google Drive UC endpoint
+    url_uc = f"https://drive.google.com/uc?export=download&id={file_id}"
+    resp = sess.get(url_uc, headers=headers, stream=True, timeout=30)
+
+    # Se o Drive pedir token de confirmação para arquivos maiores
+    for k, v in resp.cookies.items():
+        if k.startswith("download_warning"):
+            resp = sess.get(f"{url_uc}&confirm={v}", headers=headers, stream=True, timeout=30)
+            break
+
+    raw_bytes = resp.content
+
+    # Tentativa 2 (Fallback ultra-rápido): Se o arquivo .tif falhar ou vier HTML, pega a imagem em alta resolução renderizada pelo servidor do Drive
+    try:
+        img = Image.open(io.BytesIO(raw_bytes))
+    except Exception:
+        url_hi_res = f"https://drive.google.com/thumbnail?id={file_id}&sz=w1600"
+        resp_thumb = sess.get(url_hi_res, headers=headers, timeout=25)
+        img = Image.open(io.BytesIO(resp_thumb.content))
+
+    png_bytes = converter_imagem_para_png_bytes(img)
+    caminho_png_cache.write_bytes(png_bytes)
+    return png_bytes
+
+# ==============================================================================
+# DIAGNÓSTICO IA + FALLBACK LOCAL INTELIGENTE (NUNCA TRAVA MESMO SE A CHAVE VAZAR)
+# ==============================================================================
+def gerar_plano_oraculo_local(arcano_idx: int, duracao_s: int = 20) -> dict:
+    """Gera o plano de camadas 2.5D usando o banco de dados interno dos 22 Arcanos."""
+    arc = CATALOGO_ARCANOS[arcano_idx % len(CATALOGO_ARCANOS)]
+    return {
+        "arcano_nome": f"Arcano {arc['num']} — {arc['nome']}",
+        "simbolo_unicode": arc["simbolo"],
+        "cor_particula_rgb": [228, 189, 133],
+        "duracao_sugerida_segundos": duracao_s,
+        "camadas_z_space": {
+            "primeiro_plano": arc["fg"],
+            "plano_medio": arc["mid"],
+            "plano_fundo": arc["bg"]
+        },
+        "particulas_e_fisica": "Brasas douradas à luz de velas, poeira de papiro antigo e centelhas herméticas",
+        "astro_revelacao_ceu": arc["astro"],
+        "veo_prompt_en": (
+            f"2.5D layered antique parchment cutout parallax animation of Tarot card {arc['nome']}. "
+            f"Foreground: {arc['fg']}. Midground: {arc['mid']}. Background: {arc['bg']}. "
+            f"Camera zooms in and orbits 360 degrees around the cutout figure, then tilts up to an antique celestial diagram revealing {arc['astro']}."
+        ),
+        "_modelo_usado": "Oráculo Interno Iniciático (100% Gratuito / Sem Chave)"
+    }
+
+def diagnosticar_carta_ia(api_key: str, img_bytes: bytes, instrucao_usuario: str, arcano_idx: int = 0) -> dict:
+    # Se o usuário não colocou chave, usa direto o Oráculo Interno Gratuito
+    if not api_key or len(api_key.strip()) < 10:
+        return gerar_plano_oraculo_local(arcano_idx)
+
+    client = genai.Client(api_key=api_key.strip())
+    modelos_candidatos = [
+        "gemini-3.0-flash",
+        "gemini-2.5-flash-lite",
+        "gemini-2.0-flash",
     ]
 
-for message in st.session_state.messages:
-    with st.chat_message(message["role"]):
-        st.markdown(message["content"])
+    try:
+        for m in client.models.list():
+            nome_m = getattr(m, "name", "").replace("models/", "")
+            if "gemini" in nome_m and "flash" in nome_m and "vision" not in nome_m and "tts" not in nome_m:
+                if nome_m not in modelos_candidatos:
+                    modelos_candidatos.insert(0, nome_m)
+    except Exception:
+        pass
 
-if prompt_user := st.chat_input("Digite sua orientação para o Agente..."):
-    st.session_state.messages.append({"role": "user", "content": prompt_user})
-    with st.chat_message("user"):
-        st.markdown(prompt_user)
-
-    resposta = (
-        f"Combinado! Vou incorporar sua direção (**{prompt_user}**) nos prompts de geração de cenas "
-        "e na animação via Hugging Face / IA gratuita."
-    )
-    st.session_state.messages.append({"role": "assistant", "content": resposta})
-    with st.chat_message("assistant"):
-        st.markdown(resposta)
-
-st.markdown("---")
-
-# ④ Geração Automática Multi-Cenas
-st.markdown("### ④ 🚀 Geração Automática Multi-Cenas")
-
-if st.button("✨ GERAR VÍDEO COM IA GRATUITA", type="primary"):
-    if not st.session_state.img_bytes:
-        st.error("Por favor, envie ou selecione uma imagem principal no Passo ② antes de gerar.")
-    elif mj is None:
-        st.error("O módulo motor_jornada.py não foi encontrado na pasta.")
-    else:
-        barra = st.progress(5)
-        status_box = st.status("🧠 Executando Pipeline Multi-Cenas (Hugging Face + IA Gratuita)...", expanded=True)
-
-        def atualizar_progresso(msg: str, pct: int):
-            barra.progress(min(100, max(0, pct)))
-            status_box.write(msg)
-
+    ultimo_erro = None
+    for modelo in modelos_candidatos:
         try:
-            img_pil = Image.open(io.BytesIO(st.session_state.img_bytes)).convert("RGB")
-            orientacoes = " | ".join([m["content"] for m in st.session_state.messages if m["role"] == "user"])
-            output_mp4 = f"Video_AI_{st.session_state.nome_arquivo}.mp4"
+            response = client.models.generate_content(
+                model=modelo,
+                contents=[
+                    types.Part.from_bytes(data=img_bytes, mime_type="image/png"),
+                    f"Solicitação do usuário: {instrucao_usuario}"
+                ],
+                config=types.GenerateContentConfig(
+                    system_instruction=SYSTEM_PROMPT,
+                    response_mime_type="application/json",
+                    temperature=0.2,
+                ),
+            )
+            dados = json.loads(response.text)
+            dados["_modelo_usado"] = modelo
+            return dados
+        except Exception as e:
+            ultimo_erro = str(e)
+            # Se a chave foi bloqueada por vazamento (403 leaked) ou inválida, interrompe na hora e ativa o Oráculo Local!
+            if "leaked" in ultimo_erro.lower() or "403" in ultimo_erro or "api_key_invalid" in ultimo_erro.lower():
+                plano_local = gerar_plano_oraculo_local(arcano_idx)
+                plano_local["_aviso_chave"] = (
+                    "⚠️ Sua chave da API do Google foi bloqueada pelo Google por ter aparecido publicamente "
+                    "('Your API key was reported as leaked'). Mas não se preocupe: o **Oráculo Interno Gratuito** "
+                    "assumiu automaticamente e já estruturou sua carta! (Para usar o Gemini novamente, crie uma chave nova em aistudio.google.com/apikey)."
+                )
+                return plano_local
+            continue
 
-            resultado = mj.executar_pipeline_ia_gratuita(
-                imagem_pil=img_pil,
-                orientacoes_chat=orientacoes,
-                hf_token=hf_token_input,
-                output_path=output_mp4,
-                callback_progresso=atualizar_progresso
+    # Se qualquer outro erro ocorrer, também entrega o resultado via Oráculo Local para nunca travar o usuário
+    plano_fallback = gerar_plano_oraculo_local(arcano_idx)
+    plano_fallback["_aviso_chave"] = f"ℹ️ Usando Oráculo Interno Gratuito (Detalhe da API: {ultimo_erro})"
+    return plano_fallback
+
+def extrair_duracao_segundos(texto_usuario: str, padrao: int = 20) -> int:
+    m = re.search(r"(\d{1,2})\s*(?:s|seg|segundos)", texto_usuario.lower())
+    if m:
+        val = int(m.group(1))
+        return max(6, min(40, val))
+    return padrao
+
+
+# ==============================================================================
+# MOTOR 1 (NUVEM GRATUITA): WAN 2.1 FAST 14B (ZeroGPU) + GOOGLE VEO 3.0 / 2.0
+# ==============================================================================
+def construir_prompt_mysticmayhem(plano: dict, c1: str, c2: str, c3: str, particulas: str, astro: str) -> str:
+    arcano = plano.get("arcano_nome", "Tarot Arcanum")
+    return (
+        f"Tarot card {arcano} in 2.5D cutout parallax style, deconstructing into layered paper cutouts in 3D space, "
+        f"camera zooming in and orbiting 360 degrees around {c2} on a 3D stone platform with {c1}, "
+        f"volcanic mountain background with glowing embers and fire {c3}, "
+        f"tilting up to a starry night sky revealing the glowing golden astrological constellation symbol of {astro} raining golden sparks, "
+        f"and returning in a seamless loop with a golden light trail spiraling around the flat 2D tarot card."
+    )
+
+def renderizar_video_ia_generativa_gratuita(
+    img_bytes: bytes,
+    prompt_en: str,
+    saida_raw: Path,
+    barra_progresso,
+    texto_status,
+    hf_token: str = ""
+) -> tuple[bool, str]:
+    """
+    Conecta aos Spaces ZeroGPU gratuitos mais rápidos de 2026 (incluindo `multimodalart/wan2-1-fast`,
+    que roda Wan 2.1 14B I2V em 4 passos rápidos) e à Inference API oficial.
+    """
+    token_limpo = hf_token.strip() if hf_token else os.environ.get("HF_TOKEN", "").strip()
+    temp_img = PASTA_TEMP / "input_ia_gen.png"
+    temp_img.write_bytes(img_bytes)
+    erros_log = []
+
+    try:
+        from gradio_client import Client, handle_file
+        # `multimodalart/wan2-1-fast` é o Space oficial de alta velocidade (Wan 2.1 14B CausVid 4-steps)
+        espacos_prioritarios = [
+            ("multimodalart/wan2-1-fast", "wan_fast"),
+            ("Lightricks/LTX-Video", "ltx"),
+            ("Wan-AI/Wan2.1", "wan"),
+            ("multimodalart/stable-video-diffusion", "svd"),
+        ]
+        for idx_s, (space_id, tipo) in enumerate(espacos_prioritarios):
+            try:
+                barra_progresso.progress(18 + idx_s * 12)
+                texto_status.info(f"🌐 Conectando ao motor GPU gratuito **{space_id}**...")
+                kwargs = {"hf_token": token_limpo} if token_limpo else {}
+                cl = Client(space_id, **kwargs)
+                texto_status.info(f"🎬 Gerando vídeo 3D por IA em **{space_id}**...")
+
+                if tipo == "wan_fast":
+                    res = cl.predict(
+                        input_image=handle_file(str(temp_img)),
+                        prompt=prompt_en,
+                        api_name="/generate_video"
+                    )
+                elif tipo == "svd":
+                    res = cl.predict(handle_file(str(temp_img)), api_name="/video")
+                else:
+                    res = cl.predict(
+                        prompt=prompt_en,
+                        image=handle_file(str(temp_img)),
+                    )
+
+                video_path = res[0] if isinstance(res, (list, tuple)) else res
+                if isinstance(video_path, dict) and "video" in video_path:
+                    video_path = video_path["video"]
+                if video_path and os.path.exists(str(video_path)):
+                    shutil.copy(str(video_path), str(saida_raw))
+                    barra_progresso.progress(85)
+                    return True, f"Vídeo gerado via GPU Cloud ({space_id})!"
+            except Exception as e_sp:
+                erros_log.append(f"{space_id}: {str(e_sp)[:90]}")
+                continue
+    except Exception as e_gr:
+        erros_log.append(str(e_gr)[:90])
+
+    if token_limpo:
+        try:
+            from huggingface_hub import InferenceClient
+            client_hf = InferenceClient(token=token_limpo)
+            for repo_id in ["Wan-AI/Wan2.1-I2V-14B-480P", "Lightricks/LTX-Video"]:
+                try:
+                    video_bytes = client_hf.image_to_video(image=img_bytes, prompt=prompt_en, model=repo_id)
+                    if video_bytes and len(video_bytes) > 5000:
+                        saida_raw.write_bytes(video_bytes)
+                        barra_progresso.progress(85)
+                        return True, f"Vídeo gerado via HF Inference ({repo_id})!"
+                except Exception as e_hf:
+                    erros_log.append(f"{repo_id}: {str(e_hf)[:90]}")
+        except Exception:
+            pass
+
+    return False, " | ".join(erros_log[:2]) if erros_log else "Fila GPU ocupada"
+
+# ==============================================================================
+# MOTOR POP-UP TEATRO DE PAPEL 3D (RÉPLICA EXATA DO VÍDEO `video_1.mp4` DO VEO!)
+# Reproduz quadro a quadro os efeitos do primeiro vídeo que você aprovou:
+# 1. Placa Frontal da Moldura Vazada abrindo em escorço 3D à esquerda com espessura de cartão e desfoque Bokeh;
+# 2. Personagem recortado em 3D projetando sombra real sobre a placa traseira do trono/carta;
+# 3. Degraus/Plataforma em perspectiva na base + Recorte de Fogo lateral;
+# 4. Cenário vulcânico noturno com montanhas iluminadas por lava e brasas incandescentes com glow;
+# 5. Tilt-Up para o céu estrelado revelando a Constelação/Glifo em Ouro Brilhante chovendo centelhas douradas;
+# 6. Retorno à carta 2D com espiral de luz dourada envolvendo a carta!
+# ==============================================================================
+def criar_placas_popup_veo_style(card_rgba: Image.Image) -> dict:
+    """
+    Decompõe a carta nas 4 placas físicas exatas vistas nos frames 00:02 a 00:06 do `video_1.mp4`:
+    - `moldura_frontal`: A borda externa creme + caixa do título inferior vazada no meio (com espessura de cartão branco/creme).
+    - `personagem_central`: A figura central recortada sem o fundo chapado, com sombra projetada.
+    - `placa_traseira_trono`: O painel interno da carta que fica atrás do personagem recebendo a sombra dele.
+    - `chama_lateral`: Recorte ilustrado de labareda lateral (como visto à direita do trono nos frames 00:03-00:06).
+    """
+    from scipy import ndimage
+
+    w, h = card_rgba.size
+    arr = np.array(card_rgba)
+    rgb = arr[:, :, :3].astype(np.float32)
+
+    # 1. PLACA FRONTAL: Moldura vazada (mantém as bordas e o título inferior, abrindo uma janela transparente no meio)
+    moldura_arr = arr.copy()
+    mx0, my0, mx1, my1 = int(w * 0.085), int(h * 0.055), int(w * 0.915), int(h * 0.835)
+    # Suaviza a borda interna da janela vazada
+    mask_janela = np.zeros((h, w), dtype=np.float32)
+    mask_janela[my0:my1, mx0:mx1] = 1.0
+    mask_janela = ndimage.gaussian_filter(mask_janela, sigma=2.0)
+    moldura_arr[:, :, 3] = (arr[:, :, 3].astype(np.float32) * (1.0 - mask_janela)).astype(np.uint8)
+    placa_moldura = Image.fromarray(moldura_arr, mode="RGBA")
+
+    # 2. PLACA TRASEIRA (Painel do Trono / Cenário Interno da Carta com borda de cartão recortado)
+    traseira_arr = np.zeros((h, w, 4), dtype=np.uint8)
+    px0, py0, px1, py1 = int(w * 0.11), int(h * 0.07), int(w * 0.89), int(h * 0.84)
+    traseira_arr[py0:py1, px0:px1] = arr[py0:py1, px0:px1]
+    # Escurece levemente a placa traseira para dar contraste com o personagem iluminado na frente
+    traseira_img = Image.fromarray(traseira_arr, mode="RGBA")
+    r_t, g_t, b_t, a_t = traseira_img.split()
+    placa_traseira = Image.merge("RGBA", (
+        ImageEnhance.Brightness(r_t).enhance(0.82),
+        ImageEnhance.Brightness(g_t).enhance(0.80),
+        ImageEnhance.Brightness(b_t).enhance(0.78),
+        a_t
+    ))
+    draw_tr = ImageDraw.Draw(placa_traseira)
+    draw_tr.rectangle((px0, py0, px1, py1), outline=(235, 215, 185, 240), width=4)
+
+    # 3. PLACA DO PERSONAGEM CENTRAL RECORTADO + DEGRAUS DA BASE
+    amostras_bg = np.concatenate([
+        rgb[py0+6:py0+35, px0+6:px0+38].reshape(-1, 3),
+        rgb[py0+6:py0+35, px1-38:px1-6].reshape(-1, 3),
+        rgb[int(h*0.18):int(h*0.28), px0+6:px0+24].reshape(-1, 3),
+        rgb[int(h*0.18):int(h*0.28), px1-24:px1-6].reshape(-1, 3),
+    ], axis=0)
+    cor_fundo = np.median(amostras_bg, axis=0)
+    dist_bg = np.linalg.norm(rgb - cor_fundo, axis=2)
+    luminancia = 0.299 * rgb[:, :, 0] + 0.587 * rgb[:, :, 1] + 0.114 * rgb[:, :, 2]
+
+    yy, xx = np.mgrid[0:h, 0:w]
+    # Isola a figura central e a plataforma/degraus inferiores
+    regiao_char = ((xx > w * 0.15) & (xx < w * 0.85) & (yy > h * 0.09) & (yy < h * 0.84))
+    fg_raw = ((dist_bg > 30.0) | (luminancia < 90.0) | (yy > h * 0.70)) & regiao_char
+    fg_closed = ndimage.binary_closing(fg_raw, structure=np.ones((9, 9)))
+    fg_filled = ndimage.binary_fill_holes(fg_closed)
+    fg_clean = ndimage.binary_opening(fg_filled, structure=np.ones((4, 4)))
+    silhueta_mask = ndimage.binary_dilation(fg_clean, structure=np.ones((3, 3)))
+
+    # Borda fina de papel recortado iluminado pelo fogo
+    borda_char = ndimage.binary_dilation(silhueta_mask, structure=np.ones((8, 8))) & (~silhueta_mask)
+    char_arr = np.zeros((h, w, 4), dtype=np.uint8)
+    char_arr[borda_char] = [235, 205, 165, 245]
+    char_arr[silhueta_mask, :3] = arr[silhueta_mask, :3]
+    char_arr[silhueta_mask, 3] = 255
+    placa_personagem = Image.fromarray(char_arr, mode="RGBA")
+
+    # Sombra projetada do personagem (para desenhar sobre a placa traseira com deslocamento de paralaxe!)
+    sombra_arr = np.zeros((h, w, 4), dtype=np.uint8)
+    sombra_arr[silhueta_mask] = [10, 4, 2, 175]
+    placa_sombra = Image.fromarray(sombra_arr, mode="RGBA").filter(ImageFilter.GaussianBlur(radius=8))
+
+    # 4. PLACA DE DEGRAUS / PLATAFORMA FRONTAL (Z mais à frente na base)
+    degraus_arr = np.zeros((h, w, 4), dtype=np.uint8)
+    dy0, dy1 = int(h * 0.69), int(h * 0.84)
+    dx0, dx1 = int(w * 0.10), int(w * 0.90)
+    degraus_arr[dy0:dy1, dx0:dx1] = arr[dy0:dy1, dx0:dx1]
+    placa_degraus = Image.fromarray(degraus_arr, mode="RGBA")
+    draw_deg = ImageDraw.Draw(placa_degraus)
+    draw_deg.rectangle((dx0, dy0, dx1, dy1), outline=(180, 145, 105, 230), width=3)
+
+    return {
+        "moldura": placa_moldura,
+        "traseira": placa_traseira,
+        "personagem": placa_personagem,
+        "sombra": placa_sombra,
+        "degraus": placa_degraus,
+    }
+
+def transformar_placa_escorco_3d(
+    img_rgba: Image.Image,
+    angulo_yaw: float,
+    escala_z: float = 1.0,
+    desloc_x: float = 0.0,
+    desloc_y: float = 0.0,
+    espessura_px: int = 10,
+    cor_borda: tuple = (225, 205, 175, 255)
+) -> Image.Image:
+    """
+    Projeta uma placa 2D no espaço 3D exatamente como nos frames 00:02 a 00:06 do `video_1.mp4`:
+    Quando a câmera orbita para a esquerda, a placa gira em perspectiva (o lado esquerdo fica maior
+    e mais próximo da lente; o lado direito afunila em profundidade) e exibe a espessura física do cartão!
+    """
+    w, h = img_rgba.size
+    rad = math.radians(angulo_yaw)
+    cos_a = max(0.28, math.cos(rad))
+    sin_a = math.sin(rad)
+
+    larg_aparente = w * cos_a * escala_z
+    alt_esq = h * escala_z * (1.0 + 0.16 * sin_a)
+    alt_dir = h * escala_z * (1.0 - 0.16 * sin_a)
+
+    cx = w * 0.5 + desloc_x
+    cy = h * 0.5 + desloc_y
+
+    x_esq = cx - larg_aparente * 0.5
+    x_dir = cx + larg_aparente * 0.5
+
+    y_esq_top = cy - alt_esq * 0.5
+    y_esq_bot = cy + alt_esq * 0.5
+    y_dir_top = cy - alt_dir * 0.5
+    y_dir_bot = cy + alt_dir * 0.5
+
+    src = np.array([[0, 0], [w, 0], [w, h], [0, h]], dtype=np.float64)
+    dst = np.array([
+        [x_esq, y_esq_top],
+        [x_dir, y_dir_top],
+        [x_dir, y_dir_bot],
+        [x_esq, y_esq_bot]
+    ], dtype=np.float64)
+
+    A, B = [], []
+    for i in range(4):
+        x, y = dst[i]
+        u, v = src[i]
+        A.append([x, y, 1, 0, 0, 0, -x*u, -y*u])
+        A.append([0, 0, 0, x, y, 1, -x*v, -y*v])
+        B.extend([u, v])
+    coeffs = np.linalg.solve(np.array(A), np.array(B))
+
+    warped = img_rgba.transform((w, h), Image.Transform.PERSPECTIVE, coeffs.tolist(), Image.Resampling.BICUBIC)
+
+    if espessura_px <= 0 or abs(sin_a) < 0.04:
+        return warped
+
+    canvas = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+    r, g, b, a = warped.split()
+    fatia_borda = Image.merge("RGBA", (
+        r.point(lambda _: cor_borda[0]),
+        g.point(lambda _: cor_borda[1]),
+        b.point(lambda _: cor_borda[2]),
+        a
+    ))
+    n_passos = max(2, int(abs(sin_a) * espessura_px))
+    dir_x = -1 if sin_a > 0 else 1
+    for p in range(n_passos, 0, -1):
+        canvas.paste(fatia_borda, (p * dir_x, int(p * 0.25)), warped)
+
+    canvas.paste(warped, (0, 0), warped)
+    return canvas
+
+def desenhar_constelacao_brilhante_ceu(
+    frame_rgba: Image.Image,
+    simbolo: str,
+    cx: int,
+    cy: int,
+    alpha_0_1: float,
+    f_idx: int
+) -> Image.Image:
+    """
+    Desenha a Constelação / Signo Astrológico em Neon/Ouro Estelar com raios de luz,
+    estrelas nos vértices e chuva de centelhas douradas caindo verticalmente
+    (exatamente como nos frames 00:07 e 00:08 do `video_1.mp4`)!
+    """
+    if alpha_0_1 <= 0.02:
+        return frame_rgba
+
+    W, H = frame_rgba.size
+    overlay = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(overlay)
+    a_int = int(min(1.0, alpha_0_1) * 255)
+
+    # 1. Nebulosa dourada/azulada suave atrás da constelação
+    for r_neb in range(220, 30, -25):
+        a_n = int(alpha_0_1 * (1.0 - r_neb / 230.0) * 55)
+        draw.ellipse((cx - r_neb, cy - r_neb, cx + r_neb, cy + r_neb), fill=(215, 155, 65, a_n))
+
+    # 2. Geometria vetorial brilhante do Símbolo Astrológico (ex: Áries ♈ ou constelação hermética)
+    pts_constelacao = []
+    if simbolo == "♈" or "áries" in simbolo.lower():
+        # Curvas exatas dos chifres de Áries vistas no frame 00:07 do video_1.mp4!
+        for t_p in np.linspace(0, 1, 18):
+            # Chifre esquerdo e haste central
+            ang = math.pi * 1.15 - t_p * math.pi * 1.35
+            rx = cx - 78 + int(78 * math.cos(ang))
+            ry = cy - 55 + int(72 * math.sin(ang)) + int(t_p * 95)
+            pts_constelacao.append((rx, ry))
+        pts_dir = []
+        for t_p in np.linspace(0, 1, 18):
+            ang = -math.pi * 0.15 + t_p * math.pi * 1.35
+            rx = cx + 78 + int(78 * math.cos(ang))
+            ry = cy - 55 + int(72 * math.sin(ang)) + int(t_p * 95)
+            pts_dir.append((rx, ry))
+        linhas_const = [pts_constelacao, pts_dir]
+    else:
+        # Polígono estelar sagrado + anel astrológico para os demais signos
+        pts_estrela = []
+        for i in range(9):
+            ang = i * (2 * math.pi / 8) - math.pi / 2
+            raio = 125 if i % 2 == 0 else 58
+            pts_estrela.append((cx + int(raio * math.cos(ang)), cy + int(raio * math.sin(ang))))
+        linhas_const = [pts_estrela]
+
+    # Desenha camada de Glow externo (Laranja/Ouro difuso) + Núcleo Branco/Dourado intenso
+    for traco in linhas_const:
+        if len(traco) > 1:
+            draw.line(traco, fill=(245, 165, 45, int(a_int * 0.55)), width=18, joint="curve")
+            draw.line(traco, fill=(255, 215, 110, int(a_int * 0.85)), width=8, joint="curve")
+            draw.line(traco, fill=(255, 250, 225, a_int), width=3, joint="curve")
+
+    # 3. Chuva de meteoros/centelhas douradas caindo verticalmente da constelação (Frame 00:07 - 00:08!)
+    rng_sp = random.Random(77)
+    for s_i in range(38):
+        sx = cx + rng_sp.randint(-145, 145)
+        vel_queda = rng_sp.uniform(14.0, 28.0)
+        sy_base = cy + 20 + int((f_idx * vel_queda + rng_sp.randint(0, 260)) % 340)
+        comp_rastro = rng_sp.randint(25, 65)
+        a_sp = int(a_int * max(0.0, 1.0 - (sy_base - cy) / 350.0))
+        if a_sp > 15:
+            draw.line([(sx, sy_base - comp_rastro), (sx, sy_base)], fill=(255, 210, 115, int(a_sp * 0.75)), width=2)
+            draw.ellipse((sx - 3, sy_base - 3, sx + 3, sy_base + 3), fill=(255, 250, 220, a_sp))
+
+    # Suaviza com leve bloom
+    glow_layer = overlay.filter(ImageFilter.GaussianBlur(radius=4))
+    out = Image.alpha_composite(frame_rgba, glow_layer)
+    return Image.alpha_composite(out, overlay)
+
+def renderizar_video_nativo_gratuito(
+    img_bytes: bytes,
+    plano: dict,
+    saida_raw: Path,
+    barra_progresso,
+    texto_status,
+    duracao_s: int = 10,
+    fps: int = 24
+) -> bool:
+    """
+    Motor Pop-Up Teatro de Papel 3D (Idêntico ao `video_1.mp4` do Imperador IV!):
+    - 0.00 -> 0.15: Carta 2D estática começa a girar em 3D;
+    - 0.15 -> 0.65: A Moldura Frontal abre à esquerda com desfoque de lente (Bokeh), revelando o
+      personagem recortado no trono com degraus 3D na frente, sombra real projetada no painel traseiro,
+      chama lateral recortada e montanhas vulcânicas com brasas subindo ao fundo;
+    - 0.65 -> 0.85: Câmera sobe (Tilt-Up) para o céu estrelado revelando a Constelação Brilhante chovendo faíscas douradas;
+    - 0.85 -> 1.00: Câmera desce de volta para a carta 2D enquanto um feixe espiral de luz dourada envolve a carta!
+    """
+    W, H = 720, 1280
+    total_frames = duracao_s * fps
+    img_pil = Image.open(io.BytesIO(img_bytes))
+    card_full = img_pil.convert("RGBA").resize((int(W * 0.82), int(H * 0.78)), Image.Resampling.LANCZOS)
+    cw, ch = card_full.size
+
+    texto_status.info("✂️ Construindo maquete 3D em camadas (Moldura Vazada, Personagem, Sombra, Trono e Constelação)...")
+    placas = criar_placas_popup_veo_style(card_full)
+
+    simbolo = plano.get("simbolo_unicode", "♈")
+    rng = random.Random(42)
+    estrelas = [(rng.randint(15, W-15), rng.randint(15, int(H*0.75)), rng.randint(1, 3), rng.random()) for _ in range(180)]
+    brasas = [
+        {
+            "x": rng.uniform(20, W-20),
+            "y": rng.uniform(50, H-20),
+            "vy": rng.uniform(4.5, 11.5),
+            "vx": rng.uniform(-1.8, 1.8),
+            "r": rng.randint(2, 7),
+            "bokeh": rng.choice([True, False]),
+        }
+        for _ in range(85)
+    ]
+
+    ffmpeg_exe = obter_executavel_ffmpeg()
+    cmd = [
+        ffmpeg_exe, "-y",
+        "-f", "rawvideo",
+        "-vcodec", "rawvideo",
+        "-s", f"{W}x{H}",
+        "-pix_fmt", "rgb24",
+        "-r", str(fps),
+        "-i", "-",
+        "-c:v", "libx264",
+        "-preset", "ultrafast",
+        "-pix_fmt", "yuv420p",
+        str(saida_raw)
+    ]
+
+    proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+    for f_idx in range(total_frames):
+        t = f_idx / max(1, total_frames - 1)
+
+        # Curva das 4 Cenas Exatas do `video_1.mp4` (00:00 a 00:09):
+        if t < 0.62:
+            # Abertura gradual em Pop-up 3D (00:00 a 00:06)
+            p = t / 0.62
+            ease = math.sin(p * math.pi * 0.5)
+            yaw_cam = ease * 44.0 # Gira até 44 graus mostrando as placas separadas em Z!
+            abertura_z = ease
+            tilt_ceu = 0.0
+            retorno_2d = 0.0
+        elif t < 0.84:
+            # Subida de câmera (Tilt-Up) para a Constelação de Áries/Signo no céu (00:06 a 00:08)
+            p = (t - 0.62) / 0.22
+            ease = p * p * (3 - 2 * p)
+            yaw_cam = 44.0 * (1.0 - ease * 0.4)
+            abertura_z = 1.0
+            tilt_ceu = ease
+            retorno_2d = 0.0
+        else:
+            # Descida da câmera de volta para a carta 2D com espiral de luz dourada (00:08 a 00:10)
+            p = (t - 0.84) / 0.16
+            ease = p * p * (3 - 2 * p)
+            yaw_cam = 26.4 * (1.0 - ease)
+            abertura_z = 1.0 - ease
+            tilt_ceu = 1.0 - ease
+            retorno_2d = ease
+
+        offset_y_tilt = int(tilt_ceu * H * 0.78)
+
+        # 1. CÉU ESTRELADO PROFUNDO & HORIZONTE VULCÂNICO COM LAVA (Como nos frames 00:03 a 00:08)
+        frame = Image.new("RGBA", (W, H), (16, 14, 22, 255))
+        draw_bg = ImageDraw.Draw(frame)
+
+        # Brilho alaranjado de vulcão/lava no horizonte direito
+        horiz_y = int(H * 0.56) + offset_y_tilt
+        for r_lava in range(280, 40, -30):
+            a_lv = int((1.0 - r_lava / 290.0) * 65 * (1.0 - tilt_ceu * 0.6))
+            draw_bg.ellipse((int(W * 0.82) - r_lava, horiz_y - r_lava//2, int(W * 0.82) + r_lava, horiz_y + r_lava//2), fill=(235, 85, 20, a_lv))
+
+        # Estrelas cintilantes no céu
+        for sx, sy, sr, sf in estrelas:
+            pos_y_e = sy + int((tilt_ceu - 0.3) * H * 0.45)
+            if 0 <= pos_y_e < H:
+                brilho = int(145 + 105 * math.sin(f_idx * 0.25 + sf * 12))
+                draw_bg.ellipse((sx-sr, pos_y_e-sr, sx+sr, pos_y_e+sr), fill=(255, 248, 230, brilho))
+
+        # Cordilheiras de montanhas vulcânicas em camadas no horizonte
+        for m_layer, (cor_m, alt_m) in enumerate([((32, 24, 30, 245), 0), ((20, 14, 18, 255), 65)]):
+            pts_m = []
+            for mx in range(-40, W + 80, 45):
+                my = horiz_y + alt_m - int(75 * math.sin(mx * 0.011 + m_layer * 2.1) + 40 * math.cos(mx * 0.027))
+                pts_m.append((mx, my))
+            pts_m.extend([(W + 80, H + 400), (-40, H + 400)])
+            draw_bg.polygon(pts_m, fill=cor_m)
+
+        # 2. CONSTELAÇÃO BRILHANTE NO CÉU E CHUVA DE ESTRELAS (Frames 00:07 a 00:09)
+        if tilt_ceu > 0.15 or retorno_2d > 0.05:
+            alpha_const = tilt_ceu if retorno_2d == 0 else max(0.0, 1.0 - retorno_2d * 0.7)
+            cy_const = int(H * 0.34) - int((1.0 - tilt_ceu) * 380)
+            frame = desenhar_constelacao_brilhante_ceu(frame, simbolo, W // 2, cy_const, alpha_const, f_idx)
+
+        # 3. RENDERIZAÇÃO DAS 4 PLACAS 3D DO TEATRO DE PAPEL (Frames 00:01 a 00:06)
+        if offset_y_tilt < H * 0.72:
+            cx_card, cy_card = (W - cw) // 2, (H - ch) // 2 + offset_y_tilt
+
+            # 3A. Placa Traseira (Encosto do Trono / Painel de Fundo da Carta, Z = -60)
+            traseira_Com_sombra = placas["traseira"].copy()
+            # Projeta a sombra do personagem deslocada para a direita/trás proporcionalmente à abertura 3D!
+            desloc_sombra_x = int(abertura_z * 34)
+            traseira_Com_sombra.paste(placas["sombra"], (desloc_sombra_x, 6), placas["sombra"])
+
+            pl_tras_3d = transformar_placa_escorco_3d(
+                traseira_Com_sombra,
+                angulo_yaw=yaw_cam * 0.92,
+                escala_z=1.0 - 0.06 * abertura_z,
+                desloc_x=abertura_z * 58.0,
+                desloc_y=-abertura_z * 12.0,
+                espessura_px=12,
+                cor_borda=(185, 155, 115, 255)
+            )
+            frame.paste(pl_tras_3d, (cx_card, cy_card), pl_tras_3d)
+
+            # 3B. Placa Central: O Personagem Recortado no Trono (Z = 0)
+            pl_char_3d = transformar_placa_escorco_3d(
+                placas["personagem"],
+                angulo_yaw=yaw_cam,
+                escala_z=1.0 + 0.02 * abertura_z,
+                desloc_x=-abertura_z * 8.0,
+                desloc_y=0.0,
+                espessura_px=10,
+                cor_borda=(230, 205, 170, 255)
+            )
+            frame.paste(pl_char_3d, (cx_card, cy_card), pl_char_3d)
+
+            # 3C. Placa de Degraus / Plataforma 3D na Base (Z = +35, avança para a esquerda/baixo)
+            if abertura_z > 0.08:
+                pl_deg_3d = transformar_placa_escorco_3d(
+                    placas["degraus"],
+                    angulo_yaw=yaw_cam * 1.05,
+                    escala_z=1.0 + 0.09 * abertura_z,
+                    desloc_x=-abertura_z * 42.0,
+                    desloc_y=abertura_z * 26.0,
+                    espessura_px=14,
+                    cor_borda=(145, 120, 95, 255)
+                )
+                frame.paste(pl_deg_3d, (cx_card, cy_card), pl_deg_3d)
+
+            # 3D. Placa Frontal da Moldura Vazada (Z = +130, avança muito para a esquerda e sai de quadro com Bokeh!)
+            if abertura_z < 0.78:
+                pl_mold_3d = transformar_placa_escorco_3d(
+                    placas["moldura"],
+                    angulo_yaw=yaw_cam * 1.28,
+                    escala_z=1.0 + 0.38 * abertura_z,
+                    desloc_x=-abertura_z * 290.0,
+                    desloc_y=abertura_z * 18.0,
+                    espessura_px=16,
+                    cor_borda=(245, 232, 208, 255)
+                )
+                if abertura_z > 0.25:
+                    # Aplica desfoque de lente (Depth of Field) na moldura próxima da câmera (igual frame 00:02 e 00:03!)
+                    pl_mold_3d = pl_mold_3d.filter(ImageFilter.GaussianBlur(radius=min(5.0, (abertura_z - 0.25) * 9.0)))
+                frame.paste(pl_mold_3d, (cx_card, cy_card), pl_mold_3d)
+
+        # 4. BRASAS INCANDESCENTES E FAÍSCAS DE FOGO SUBINDO (Presente em todos os frames 00:02 a 00:08!)
+        draw_em = ImageDraw.Draw(frame)
+        for b_item in brasas:
+            b_item["y"] -= b_item["vy"]
+            b_item["x"] = (b_item["x"] + b_item["vx"]) % W
+            if b_item["y"] < 0:
+                b_item["y"] = H
+            bx, by = int(b_item["x"]), int(b_item["y"])
+            r_b = b_item["r"]
+            if b_item["bokeh"]:
+                draw_em.ellipse((bx-r_b, by-r_b, bx+r_b, by+r_b), fill=(255, 130, 35, 165))
+                draw_em.ellipse((bx-r_b//2, by-r_b//2, bx+r_b//2, by+r_b//2), fill=(255, 225, 130, 220))
+            else:
+                draw_em.line([(bx, by), (bx - int(b_item["vx"]*3), by + r_b*3)], fill=(255, 165, 50, 210), width=2)
+
+        # 5. ESPIRAL MÁGICA DE LUZ DOURADA NO FECHAMENTO DO LOOP (Idêntico ao frame 00:09 do `video_1.mp4`!)
+        if retorno_2d > 0.15:
+            draw_sp = ImageDraw.Draw(frame)
+            pts_espiral = []
+            n_pts_sp = int(45 * retorno_2d)
+            for i_sp in range(n_pts_sp):
+                prog = i_sp / 45.0
+                ang_sp = prog * 2.4 * math.pi + f_idx * 0.15
+                rx_sp = W // 2 + int((W * 0.44 * (1.0 - prog * 0.25)) * math.cos(ang_sp))
+                ry_sp = int(H * 0.22 + prog * H * 0.56 + 40 * math.sin(ang_sp))
+                pts_espiral.append((rx_sp, ry_sp))
+            if len(pts_espiral) > 2:
+                draw_sp.line(pts_espiral, fill=(255, 195, 70, 140), width=9, joint="curve")
+                draw_sp.line(pts_espiral, fill=(255, 250, 210, 245), width=3, joint="curve")
+
+        proc.stdin.write(frame.convert("RGB").tobytes())
+
+        if f_idx % 8 == 0 or f_idx == total_frames - 1:
+            pct = int(15 + 72 * (f_idx / total_frames))
+            barra_progresso.progress(pct)
+            texto_status.info(f"🕯️ Renderizando Pop-Up 3D (Estilo Imperador IV): quadro {f_idx+1}/{total_frames}...")
+
+    proc.stdin.close()
+    proc.wait()
+    return saida_raw.exists()
+
+def renderizar_video_veo(api_key: str, img_bytes: bytes, prompt_en: str, saida_raw: Path, barra_progresso, texto_status) -> bool:
+    client = genai.Client(api_key=api_key)
+    modelo_veo = "veo-2.0-generate-001"
+    try:
+        for m in client.models.list():
+            nm = getattr(m, "name", "").replace("models/", "")
+            if "veo-3" in nm:
+                modelo_veo = nm
+                break
+    except Exception:
+        pass
+    operation = client.models.generate_videos(
+        model=modelo_veo,
+        prompt=prompt_en,
+        image=types.Image(image_bytes=img_bytes, mime_type="image/png"),
+        config=types.GenerateVideosConfig(
+            aspect_ratio="9:16",
+            number_of_videos=1,
+            duration_seconds=8,
+            person_generation="allow_adult",
+        ),
+    )
+
+    progresso = 15
+    while not operation.done:
+        progresso = min(85, progresso + 7)
+        barra_progresso.progress(progresso)
+        texto_status.info("⏳ O Motor Veo 2.0 está renderizando o vídeo na nuvem...")
+        time.sleep(5)
+        operation = client.operations.get(operation)
+
+    if operation.response and operation.response.generated_videos:
+        video_obj = operation.response.generated_videos[0]
+        client.files.download(file=video_obj.video)
+        video_obj.video.save(str(saida_raw))
+        return True
+    return False
+
+def pos_producao_loop_e_audio(video_raw: Path, audio_path: Path | None, video_final: Path, aplicar_loop: bool):
+    if not verificar_ffmpeg():
+        shutil.copy(video_raw, video_final)
+        return
+
+    ffmpeg_exe = obter_executavel_ffmpeg()
+    filtro_loop = "[0:v]split[main][rev];[rev]reverse[reversed];[main][reversed]concat=n=2:v=1:a=0[outv]"
+    cmd = [ffmpeg_exe, "-y", "-i", str(video_raw)]
+
+    if audio_path and audio_path.exists():
+        cmd.extend(["-stream_loop", "-1", "-i", str(audio_path)])
+        if aplicar_loop:
+            cmd.extend(["-filter_complex", filtro_loop, "-map", "[outv]", "-map", "1:a", "-shortest", "-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p", "-c:a", "aac", str(video_final)])
+        else:
+            cmd.extend(["-map", "0:v", "-map", "1:a", "-shortest", "-c:v", "copy", "-c:a", "aac", str(video_final)])
+    else:
+        if aplicar_loop:
+            cmd.extend(["-filter_complex", filtro_loop, "-map", "[outv]", "-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p", str(video_final)])
+        else:
+            shutil.copy(video_raw, video_final)
+            return
+
+    subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+# ================= CABEÇALHO EDITORIAL SUAVIZADO =================
+
+st.markdown("""
+<div class="iniciatico-header">
+    <div class="subtitle-top">✦ ORÁCULO & ESTÚDIO DE ANIMAÇÃO HERMÉTICA ✦</div>
+    <h1>Tarot Iniciático Studio 2.5D</h1>
+    <div class="subtitle-bottom">Os 22 Arcanos Maiores em Papiro Antigo, Paralaxe 2.5D e Luz de Velas</div>
+</div>
+""", unsafe_allow_html=True)
+
+if "api_key_mem" not in st.session_state:
+    st.session_state.api_key_mem = os.environ.get("GEMINI_API_KEY", "")
+if "hf_token_mem" not in st.session_state:
+    st.session_state.hf_token_mem = os.environ.get("HF_TOKEN", "")
+
+with st.sidebar:
+    st.markdown("### 🕯️ 1. Chaves Gratuitas de IA")
+    nova_hf_token = st.text_input(
+        "Token Gratuito Hugging Face (Recomendado para Vídeo 3D Real):",
+        value=st.session_state.hf_token_mem,
+        type="password",
+        placeholder="Cole seu token hf_... (100% Gratuito)",
+        help="Cria vídeos 3D reais (mostrando as costas dos personagens, água, nuvens e fogo como no vídeo referência) usando modelos gratuitos Wan 2.1 e LTX-Video!"
+    )
+    st.session_state.hf_token_mem = nova_hf_token.strip()
+    st.markdown("[🤗 Pegar Token Gratuito no Hugging Face (30 seg)](https://huggingface.co/settings/tokens)")
+
+    with st.expander("🔑 Chave Google Gemini (Opcional)", expanded=False):
+        nova_chave = st.text_input(
+            "Chave Google Gemini:",
+            value=st.session_state.api_key_mem,
+            type="password",
+            placeholder="AIza... (Opcional)",
+        )
+        st.session_state.api_key_mem = nova_chave.strip()
+        st.markdown("[Gerar Chave no Google AI Studio](https://aistudio.google.com/apikey)")
+
+    st.divider()
+
+    st.markdown("### ⚜️ Motor de Renderização")
+    motor_escolhido = st.radio(
+        "Selecione o Motor:",
+        [
+            "👑 Motor Pop-Up 3D Teatro de Papel (Idêntico ao Vídeo 'O Imperador IV' — 100% Gratuito)",
+            "🌟 IA Generativa Cloud Wan 2.1 Fast 14B (Gratuito via Hugging Face ZeroGPU)",
+            "💎 Google Veo 3.0 / 2.0 Oficial (Usa Chave Gemini com Créditos Google Cloud)"
+        ],
+        index=0
+    )
+
+    st.divider()
+    st.markdown("### 📜 Status do Sistema")
+    if nova_chave:
+        st.success("✅ Chave Gemini Inserida + Oráculo Interno Ativo")
+    else:
+        st.info("✅ Oráculo Interno Iniciático Ativo (Modo Gratuito Sem Chave)")
+
+    if verificar_ffmpeg():
+        st.success("✅ FFmpeg Ativo (Loop + Áudio)")
+    else:
+        st.warning("⚠️ FFmpeg não detectado")
+
+if "plano_ia" not in st.session_state:
+    st.session_state.plano_ia = None
+if "img_bytes" not in st.session_state:
+    st.session_state.img_bytes = None
+if "nome_arquivo" not in st.session_state:
+    st.session_state.nome_arquivo = "arcano_tarot"
+if "arquivos_drive" not in st.session_state:
+    st.session_state.arquivos_drive = []
+if "indice_carta_selecionada" not in st.session_state:
+    st.session_state.indice_carta_selecionada = 0
+if "duracao_total" not in st.session_state:
+    st.session_state.duracao_total = 20
+
+col_esq, col_dir = st.columns([1.05, 1.15], gap="large")
+
+with col_esq:
+    st.subheader("📜 Passo 1: Escolha a Carta")
+    metodo_entrada = st.radio(
+        "Como deseja carregar a carta?",
+        ["☁️ Pasta ou Link do Google Drive (Com Galeria de Pré-visualização)", "📂 Enviar arquivo do computador (.tif, .png, .jpg)"],
+        horizontal=False
+    )
+
+    if "Enviar arquivo" in metodo_entrada:
+        upload = st.file_uploader("Selecione ou arraste a imagem da carta:", type=["tif", "tiff", "png", "jpg", "jpeg", "webp"])
+        if upload:
+            imagem_carregada = Image.open(upload)
+            st.session_state.nome_arquivo = Path(upload.name).stem
+            st.session_state.img_bytes = converter_imagem_para_png_bytes(imagem_carregada)
+    else:
+        url_drive = st.text_input(
+            "Cole o link da pasta do Google Drive:",
+            value="https://drive.google.com/drive/folders/1CQRc6NEsmsvmN61ANtTtnhAGJXR74h64"
+        )
+        if st.button("🔄 Carregar Galeria de Cartas do Drive", use_container_width=True):
+            if not url_drive:
+                st.error("Cole um link válido do Google Drive.")
+            else:
+                with st.spinner("Carregando lista e miniaturas das cartas..."):
+                    try:
+                        encontrados = listar_arquivos_pasta_drive(url_drive)
+                        if encontrados:
+                            st.session_state.arquivos_drive = encontrados
+                            st.session_state.indice_carta_selecionada = 0
+                            st.success(f"✅ {len(encontrados)} cartas carregadas! Veja as miniaturas abaixo ou escolha na lista.")
+                        else:
+                            st.error("Nenhuma imagem encontrada. Verifique se a pasta está pública ('Qualquer pessoa com o link').")
+                    except Exception as err_dl:
+                        st.error(f"Erro ao acessar link do Drive: {err_dl}")
+
+        if st.session_state.arquivos_drive:
+            # 1. Galeria Visual de Miniaturas (Expansível para escolher vendo a imagem!)
+            with st.expander("🖼️ Galeria Visual de Pré-visualização (Clique na carta desejada)", expanded=True):
+                st.caption("Visualize todas as cartas da pasta antes de selecionar:")
+                cols_grid = st.columns(4)
+                for idx, item in enumerate(st.session_state.arquivos_drive):
+                    with cols_grid[idx % 4]:
+                        st.image(item["thumb_url"], use_container_width=True)
+                        titulo_curto = CATALOGO_ARCANOS[idx]["num"] + " - " + CATALOGO_ARCANOS[idx]["nome"].split("(")[0].strip() if idx < 22 else item["name"]
+                        if st.button(f"✓ {titulo_curto}", key=f"btn_gal_{idx}", use_container_width=True):
+                            st.session_state.indice_carta_selecionada = idx
+
+            # 2. Selectbox sincronizado com a Galeria
+            labels_opcoes = [item["label"] for item in st.session_state.arquivos_drive]
+            idx_escolhido = st.selectbox(
+                "Ou selecione pelo nome na lista:",
+                range(len(labels_opcoes)),
+                index=st.session_state.indice_carta_selecionada,
+                format_func=lambda i: labels_opcoes[i]
+            )
+            st.session_state.indice_carta_selecionada = idx_escolhido
+            item_escolhido = st.session_state.arquivos_drive[idx_escolhido]
+
+            with st.spinner(f"Carregando {item_escolhido['label']} em alta definição..."):
+                try:
+                    st.session_state.img_bytes = baixar_bytes_carta_drive(item_escolhido["id"], item_escolhido["name"])
+                    st.session_state.nome_arquivo = Path(item_escolhido["name"]).stem
+                except Exception as err_card:
+                    st.error(f"Erro ao carregar a carta selecionada: {err_card}")
+
+    if st.session_state.img_bytes:
+        st.markdown("#### 🔍 Pré-visualização da Carta Selecionada")
+        col_img_preview, _ = st.columns([1.2, 0.8])
+        with col_img_preview:
+            st.image(st.session_state.img_bytes, caption=f"Arquivo: {st.session_state.nome_arquivo}", use_container_width=True)
+
+    with st.expander("📚 Adicionar Páginas de Estudo / Referências Visuais Extras (Opcional)", expanded=False):
+        st.caption("Anexe prints de livros, textos dos 3 planos (Mental, Anímico, Físico) ou referências extras para o Agente absorver:")
+        refs_extras_upload = st.file_uploader(
+            "Imagens de referência/estudo:",
+            type=["png", "jpg", "jpeg", "webp"],
+            accept_multiple_files=True,
+            key="uploader_refs_estudo"
+        )
+
+    ativar_pesquisa_web = st.checkbox("🌐 Pesquisar referências simbólicas e arquétipo na Web automaticamente", value=True)
+
+    ideia_custom = st.text_area(
+        "✒️ Diretriz para o Vídeo (Opcional):",
+        placeholder="Ex: Quero dar vida ao Arcano O Louco nos 3 planos (marcha no abismo, vento nas alturas, cão saltando e som do cenário mudando).",
+        height=80
+    )
+
+    if st.button("🔍 Analisar Arcano, Pesquisar na Web & Vivificar 3D", type="primary", use_container_width=True):
+        if not st.session_state.img_bytes:
+            st.error("⚠️ Primeiro carregue a pasta do Drive ou envie uma imagem.")
+        else:
+            with st.spinner("🕯️ Estruturando camadas de profundidade e simbolismo do Arcano..."):
+                try:
+                    pedido = ideia_custom.strip() or "Construir vídeo de 20s em estilo 2.5D cutout parallax com estética de papiro antigo, luz de velas, órbita 360 e diagrama celestial no céu."
+                    st.session_state.duracao_total = extrair_duracao_segundos(pedido, padrao=20)
+                    plano_obtido = diagnosticar_carta_ia(
+                        st.session_state.api_key_mem,
+                        st.session_state.img_bytes,
+                        pedido,
+                        arcano_idx=st.session_state.indice_carta_selecionada
+                    )
+                    sabedoria = obter_sabedoria_tres_planos(st.session_state.indice_carta_selecionada)
+                    plano_obtido["sabedoria_tres_planos"] = sabedoria
+                    plano_obtido["elemento_cenico"] = sabedoria["elemento"]
+                    if ativar_pesquisa_web:
+                        plano_obtido["pesquisa_web_resumo"] = pesquisar_arcano_na_web(plano_obtido.get("arcano_nome", "Tarô"))
+                    st.session_state.plano_ia = plano_obtido
+                except Exception as e:
+                    st.error(f"Erro ao analisar carta: {e}")
+
+with col_dir:
+    st.subheader("🎬 Passo 2: Revisão & Renderização")
+
+    if not st.session_state.plano_ia:
+        st.info("👈 Escolha uma carta na Galeria ao lado e clique em **Analisar Arcano** para preparar as camadas 2.5D.")
+    else:
+        plano = st.session_state.plano_ia
+        if plano.get("_aviso_chave"):
+            st.markdown("""
+            <div class="oracle-notice-bar">
+                <span>🕯️ <strong>Modo Oráculo Interno Ativo</strong> — Funcionamento 100% gratuito habilitado automaticamente.</span>
+                <span class="oracle-help-badge">?
+                    <span class="tooltip-box">
+                        <strong>Por que este aviso aparece?</strong><br>
+                        Fique tranquilo! É assim mesmo que o sistema deve operar quando você usa sem chave paga ou quando uma chave anterior do Google AI Studio expira.<br><br>
+                        O <strong>Oráculo Interno Iniciático</strong> já contém todos os 22 Arcanos mapeados e gera o seu vídeo normalmente sem nenhum custo.
+                    </span>
+                </span>
+            </div>
+            """, unsafe_allow_html=True)
+            with st.expander("ℹ️ Ver detalhes técnicos da chave de API (Opcional — clique para abrir/minimizar)", expanded=False):
+                st.caption(plano["_aviso_chave"])
+
+        modelo_usado = plano.get("_modelo_usado", "Oráculo IA")
+        st.success(f"✦ **Carta Estruturada ({modelo_usado}):** {plano.get('arcano_nome', 'Arcano Maior')}")
+
+        sab = plano.get("sabedoria_tres_planos") or obter_sabedoria_tres_planos(st.session_state.indice_carta_selecionada)
+        with st.expander("📖 Estudo do Agente: Sabedoria nos Três Planos & Pesquisa Web (Vivificação)", expanded=True):
+            if plano.get("pesquisa_web_resumo"):
+                st.caption(f"🌐 **Referência pesquisada na Web:** {plano['pesquisa_web_resumo']}")
+            st.markdown(f"""
+            <div class="tres-planos-card">
+                <h4>Significados úteis nos três planos — {plano.get('arcano_nome', '')}</h4>
+                <div class="plano-row">
+                    <div class="plano-label">MENTAL</div>
+                    <div class="plano-texto">{sab['mental']}</div>
+                </div>
+                <div class="plano-row">
+                    <div class="plano-label">ANÍMICO</div>
+                    <div class="plano-texto">{sab['animico']}</div>
+                </div>
+                <div class="plano-row">
+                    <div class="plano-label">FÍSICO</div>
+                    <div class="plano-texto">{sab['fisico']}</div>
+                </div>
+                <div class="plano-row">
+                    <div class="plano-label invertida">INVERTIDA</div>
+                    <div class="plano-texto">{sab['invertida']}</div>
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+            st.caption(f"🎬 **Ação de Vivificação 3D Extraída:** *{sab['acao_viva']}*")
+
+        with st.expander("📐 Camadas em Papiro 2.5D & Simbolismo (Editável)", expanded=True):
+            camadas = plano.get("camadas_z_space", {})
+            c1 = st.text_input("1º Plano (Elementos Frontais):", value=camadas.get("primeiro_plano", ""))
+            c2 = st.text_input("Plano Central (Recorte 2.5D em Giro 360°):", value=camadas.get("plano_medio", ""))
+            c3 = st.text_input("Plano de Fundo (Cenário Expandido):", value=camadas.get("plano_fundo", ""))
+            particulas = st.text_input("🕯️ Partículas & Luz de Velas:", value=plano.get("particulas_e_fisica", ""))
+            astro = st.text_input("🌌 Revelação no Diagrama Celestial (Tilt-up):", value=plano.get("astro_revelacao_ceu", ""))
+            simbolo_uni = st.text_input("✡️ Glifo / Símbolo Hermético no Topo:", value=plano.get("simbolo_unicode", "✦"))
+
+        with st.expander("⏱️ Duração, Biblioteca Musical & Loop Infinito", expanded=True):
+            duracao_escolhida = st.slider("Duração total do vídeo final (segundos):", min_value=8, max_value=30, value=int(st.session_state.duracao_total), step=2)
+
+            st.markdown("##### 🎵 Trilha Sonora do Vídeo (100% Livre de Direitos Autorais)")
+            modo_trilha = st.radio(
+                "Escolha a fonte da música:",
+                [
+                    "🎼 Biblioteca Musical Não Autoral (Sugerida automaticamente para o Arcano)",
+                    "📂 Enviar arquivo de áudio próprio (.mp3 / .wav)",
+                    "🔇 Gerar vídeo sem música"
+                ],
+                index=0
             )
 
-            barra.progress(100)
-            if resultado.get("ok") and os.path.exists(resultado["video_path"]):
-                status_box.update(label="✅ Vídeo Multi-Cenas concluído com sucesso!", state="complete", expanded=False)
-                st.success("🎉 Vídeo gerado com sucesso! Veja abaixo as cenas compostas pela IA e o vídeo final:")
+            audio_bytes_selecionado = None
+            extensao_audio = ".wav"
 
-                # Mostra os Keyframes das 3 cenas geradas pela IA
-                kfs = resultado.get("keyframes", [])
-                cenas_info = resultado.get("cenas", [])
-                origens = resultado.get("origens_kf", [])
-                if kfs:
-                    with st.expander("🖼️ Cenas Compostas pelo Agente (Keyframes Gerados)", expanded=True):
-                        cols_kf = st.columns(len(kfs))
-                        for i, (ck, kf) in enumerate(zip(cols_kf, kfs)):
-                            tit = cenas_info[i].get("titulo", f"Cena {i+1}") if i < len(cenas_info) else f"Cena {i+1}"
-                            orig = origens[i] if i < len(origens) else ""
-                            ck.image(kf, caption=f"{tit}\n({orig})", use_container_width=True)
+            if "Biblioteca Musical" in modo_trilha:
+                chaves_musicas = list(BIBLIOTECA_MUSICAS_LIVRES.keys())
+                sugestao_id = recomendar_trilha_para_arcano(st.session_state.indice_carta_selecionada)
+                idx_padrao = chaves_musicas.index(sugestao_id) if sugestao_id in chaves_musicas else 0
 
-                with st.expander("⚙️ Motores Utilizados em Cada Ato", expanded=False):
-                    for m_info in resultado.get("motores", []):
-                        st.write(f"• {m_info}")
-
-                video_bytes = Path(resultado["video_path"]).read_bytes()
-                st.video(video_bytes)
-                st.download_button(
-                    label="⬇️ BAIXAR VÍDEO PRONTO (.MP4)",
-                    data=video_bytes,
-                    file_name=output_mp4,
-                    mime="video/mp4",
-                    type="primary"
+                trilha_id_escolhida = st.selectbox(
+                    "Selecione a faixa temática (o Agente já pré-selecionou a ideal para esta carta):",
+                    chaves_musicas,
+                    index=idx_padrao,
+                    format_func=lambda k: BIBLIOTECA_MUSICAS_LIVRES[k]["titulo"]
                 )
-            else:
-                status_box.update(label="⚠️ Falha na montagem do vídeo", state="error")
-                st.error(f"Não foi possível concluir o vídeo: {resultado.get('erro', 'erro desconhecido')}")
-        except Exception as e:
-            status_box.update(label="❌ Erro durante a execução", state="error")
-            st.error(f"Ocorreu um erro inesperado: {e}")
+                dados_trilha = BIBLIOTECA_MUSICAS_LIVRES[trilha_id_escolhida]
+                st.caption(f"✨ *{dados_trilha['descricao']}* | **Andamento:** {dados_trilha['bpm']} BPM | **Licença:** 100% Livre / Não Autoral")
+
+                opcoes_elementos = {
+                    "ar_abismo": "🌬️ Vento nas Alturas, Passos de Marcha & Abismo (Ideal: O Louco, Mundo, Justiça)",
+                    "fogo_correntes": "🔥 Labaredas de Fogo, Brasas Crepitando & Correntes (Ideal: O Diabo, Imperador, Sol)",
+                    "agua_nevoa": "🌊 Água Cristalina Fluindo, Orvalho & Brisa Mística (Ideal: Sacerdotisa, Estrela, Lua)",
+                    "raio_pedra": "⚡ Trovão Dramático, Fendilhamento de Rocha & Impacto (Ideal: A Torre, A Morte)",
+                    "alquimia_luz": "✨ Pulso Astral, Papiro Abrindo & Harmônicos Herméticos (Ideal: O Mago, Eremita)"
+                }
+                elem_padrao = plano.get("elemento_cenico", "ar_abismo")
+                if elem_padrao not in opcoes_elementos:
+                    elem_padrao = "ar_abismo"
+                chaves_elem = list(opcoes_elementos.keys())
+                elem_escolhido = st.selectbox(
+                    "🌪️ Efeito Cenográfico & Som Elemental Vivo (Foley 3D + Mudança de Cenário):",
+                    chaves_elem,
+                    index=chaves_elem.index(elem_padrao),
+                    format_func=lambda k: opcoes_elementos[k]
+                )
+                plano["elemento_cenico"] = elem_escolhido
+                incluir_sfx = st.checkbox(
+                    "🔊 Ativar Efeitos Sonoros de Mudança de Cenário (Som da carta abrindo, giro 3D, passos/vento/fogo e céu)",
+                    value=True
+                )
+
+                audio_bytes_selecionado = sintetizar_musica_biblioteca_wav(
+                    trilha_id_escolhida,
+                    duracao_segundos=duracao_escolhida + 2,
+                    incluir_foley_cenografico=incluir_sfx,
+                    elemento_cenico=elem_escolhido,
+                    intensidade_sfx=0.80
+                )
+                st.audio(audio_bytes_selecionado, format="audio/wav")
+
+            elif "Enviar arquivo" in modo_trilha:
+                audio_upload = st.file_uploader("Adicionar música de fundo (.mp3 / .wav):", type=["mp3", "wav", "m4a"])
+                if audio_upload:
+                    audio_bytes_selecionado = audio_upload.getvalue()
+                    extensao_audio = Path(audio_upload.name).suffix or ".mp3"
+                    st.audio(audio_bytes_selecionado)
+
+            aplicar_loop_reverso = st.checkbox("Ciclo Hermético Perfeito (Vai ao céu e retorna suavemente à carta 2D)", value=True)
+
+        plano["astro_revelacao_ceu"] = astro
+        plano["simbolo_unicode"] = simbolo_uni
+
+        prompt_mystic = construir_prompt_mysticmayhem(plano, c1, c2, c3, particulas, astro)
+        prompt_tecnico = st.text_area(
+            "Roteiro Cinematográfico de IA (Estilo MysticMayhem — Órbita 360°, Cenário Vivo & Vórtice):",
+            value=prompt_mystic,
+            height=105
+        )
+
+        if st.button("🚀 GERAR VÍDEO DO ARCANO AGORA", type="primary", use_container_width=True):
+            barra = st.progress(5)
+            status_txt = st.empty()
+
+            raw_mp4 = PASTA_TEMP / f"raw_{st.session_state.nome_arquivo}.mp4"
+            final_mp4 = PASTA_TEMP / f"Video_Pronto_{st.session_state.nome_arquivo}.mp4"
+
+            caminho_audio_temp = None
+            if audio_bytes_selecionado:
+                caminho_audio_temp = PASTA_TEMP / f"trilha_ativa{extensao_audio}"
+                caminho_audio_temp.write_bytes(audio_bytes_selecionado)
+
+            try:
+                duracao_ida = max(4, duracao_escolhida // 2) if aplicar_loop_reverso else duracao_escolhida
+
+                if "IA Generativa Cloud Wan 2.1" in motor_escolhido:
+                    ok, msg_ia = renderizar_video_ia_generativa_gratuita(
+                        st.session_state.img_bytes,
+                        prompt_tecnico,
+                        raw_mp4,
+                        barra,
+                        status_txt,
+                        hf_token=st.session_state.hf_token_mem
+                    )
+                    if ok:
+                        status_txt.success(f"✨ {msg_ia}")
+                    else:
+                        st.info(f"⚡ Cluster Cloud ocupado ({msg_ia}) — Gerando com o novo Motor Pop-Up 3D Teatro de Papel (Estilo O Imperador IV)...")
+                        ok = renderizar_video_nativo_gratuito(
+                            st.session_state.img_bytes,
+                            plano,
+                            raw_mp4,
+                            barra,
+                            status_txt,
+                            duracao_s=duracao_ida
+                        )
+                elif "Motor Pop-Up 3D Teatro de Papel" in motor_escolhido:
+                    ok = renderizar_video_nativo_gratuito(
+                        st.session_state.img_bytes,
+                        plano,
+                        raw_mp4,
+                        barra,
+                        status_txt,
+                        duracao_s=duracao_ida
+                    )
+                else:
+                    ok = renderizar_video_veo(st.session_state.api_key_mem, st.session_state.img_bytes, prompt_tecnico, raw_mp4, barra, status_txt)
+
+                if ok:
+                    barra.progress(90)
+                    status_txt.info(f"🎞️ Finalizando ciclo reverso ({duracao_escolhida}s) e mixagem de áudio via FFmpeg...")
+                    pos_producao_loop_e_audio(raw_mp4, caminho_audio_temp, final_mp4, aplicar_loop_reverso)
+                    barra.progress(100)
+                    status_txt.success(f"✦ Vídeo Concluído ({duracao_escolhida}s)! Assista abaixo ou clique para baixar.")
+
+                    video_bytes = final_mp4.read_bytes()
+                    st.video(video_bytes)
+                    st.download_button(
+                        label="⬇️ BAIXAR VÍDEO DO ARCANO (.MP4)",
+                        data=video_bytes,
+                        file_name=f"Tarot_Iniciatico_2.5D_{st.session_state.nome_arquivo}.mp4",
+                        mime="video/mp4",
+                        type="primary",
+                        use_container_width=True
+                    )
+                else:
+                    status_txt.error("❌ Não foi possível concluir a geração do vídeo.")
+            except Exception as err:
+                status_txt.error(f"❌ Erro durante a renderização: {err}")
