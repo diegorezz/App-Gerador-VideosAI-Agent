@@ -1,11 +1,6 @@
 import os
-import re
 import io
 import time
-import json
-import random
-import shutil
-import subprocess
 from pathlib import Path
 import streamlit as st
 from PIL import Image
@@ -18,7 +13,7 @@ except Exception as _e_mj:
     _ERRO_MJ = str(_e_mj)
 
 st.set_page_config(
-    page_title="AI Video Agent - Gerador de Vídeos",
+    page_title="AI Video Agent - Gerador Multi-Cenas Gratuito",
     page_icon="🎬",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -33,7 +28,7 @@ st.markdown("""
         color: white;
         font-weight: bold;
         border-radius: 8px;
-        padding: 0.6rem 1rem;
+        padding: 0.65rem 1rem;
     }
     .stButton>button:hover {
         background-color: #FF2B2B;
@@ -45,178 +40,238 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ------------------------------------------------------------------------------
-# BARRA LATERAL: CONFIGURAÇÕES E PROVEDORES DE IA
+# BARRA LATERAL: PROVEDORES DE IA (HUGGING FACE / GRATUITO) & BASE DE CONHECIMENTO
 # ------------------------------------------------------------------------------
 with st.sidebar:
     st.markdown("## ⚙️ CONFIGURAÇÃO")
-    
-    st.markdown("### 🔌 Provedor de IA")
+
+    st.markdown("### 🔌 Inteligência Artificial")
     provedor_ia = st.selectbox(
-        "Selecione o Provedor",
-        ["Automático (Recomendado)", "Google AI (Gemini)", "Hugging Face", "Modelo Local / Open Source", "Outro Compatível"],
+        "Estratégia de Provedor:",
+        [
+            "Automático (Hugging Face + IA Gratuita)",
+            "Hugging Face Spaces (Wan 2.1 / LTX-Video / FLUX)",
+            "IA Gratuita sem Token (Pollinations + Motor 3D)",
+            "Outro Provedor Compatível"
+        ],
         index=0,
-        help="O sistema gerencia automaticamente os recursos disponíveis de forma gratuita."
+        help="O Agente gerencia automaticamente os modelos gratuitos disponíveis para compor cenas novas e animá-las."
     )
-    
-    with st.expander("Chaves de Acesso / API (Opcional)"):
-        api_key_input = st.text_input("Chave de API (Google / HF)", type="password", help="Opcional. Se não informada, o sistema utiliza o modo gratuito local inteligente.")
-        
+
+    with st.expander("🔑 Chaves / Token Gratuito Hugging Face (Opcional)", expanded=True):
+        hf_token_input = st.text_input(
+            "Token Hugging Face (hf_...):",
+            value=os.environ.get("HF_TOKEN", ""),
+            type="password",
+            placeholder="hf_...",
+            help="Crie um token 100% gratuito em huggingface.co/settings/tokens para liberar maior prioridade nas filas de vídeo (Wan 2.1 / LTX-Video) e imagem (FLUX.1)."
+        )
+        st.caption("[Criar Token Gratuito no Hugging Face ↗](https://huggingface.co/settings/tokens)")
+
     st.markdown("---")
     st.markdown("### 📚 Base de Conhecimento")
-    st.markdown("📁 **Google Drive**")
-    st.markdown("[Acessar Base de Dados do Drive](https://drive.google.com/drive/folders/13RrQaR3UljINVKz471hOW4J54mbbIfql?usp=drive_link)")
-    
+    st.markdown("📁 **Google Drive (Vídeos e Imagens)**")
+    st.markdown("[Abrir Pasta no Google Drive ↗](https://drive.google.com/drive/folders/13RrQaR3UljINVKz471hOW4J54mbbIfql?usp=drive_link)")
+
     if "arquivos_drive" not in st.session_state:
         st.session_state.arquivos_drive = []
     if "img_bytes" not in st.session_state:
         st.session_state.img_bytes = None
     if "nome_arquivo" not in st.session_state:
-        st.session_state.nome_arquivo = "imagem_base"
+        st.session_state.nome_arquivo = "arte_base"
 
-    url_drive_input = st.text_input("Link da Pasta do Drive:", value="https://drive.google.com/drive/folders/13RrQaR3UljINVKz471hOW4J54mbbIfql?usp=drive_link")
+    url_drive_input = st.text_input(
+        "Link da Base no Drive:",
+        value="https://drive.google.com/drive/folders/13RrQaR3UljINVKz471hOW4J54mbbIfql?usp=drive_link"
+    )
     if st.button("🔄 Sincronizar Biblioteca Visual"):
         if mj:
-            try:
-                encontrados = mj.listar_arquivos_pasta_drive(url_drive_input)
-                if encontrados:
-                    st.session_state.arquivos_drive = encontrados
-                    st.success(f"✅ {len(encontrados)} arquivos sincronizados com sucesso!")
-                else:
-                    st.warning("Nenhum arquivo de imagem encontrado na pasta.")
-            except Exception as e:
-                st.error(f"Erro ao acessar Drive: {e}")
-                
+            with st.spinner("Sincronizando arquivos do Google Drive..."):
+                try:
+                    encontrados = mj.listar_arquivos_pasta_drive(url_drive_input)
+                    if encontrados:
+                        st.session_state.arquivos_drive = encontrados
+                        st.success(f"✅ {len(encontrados)} arquivos encontrados na base!")
+                    else:
+                        st.warning("Nenhum arquivo encontrado. Verifique se a pasta está pública.")
+                except Exception as e:
+                    st.error(f"Erro ao sincronizar Drive: {e}")
+
     st.markdown("---")
     st.markdown("### 🖥️ Status do Sistema")
-    st.markdown("🟢 **Agente Inteligente**: Ativo")
-    st.markdown("🟢 **Motor FFmpeg**: Ativo")
-    st.markdown("🟢 **Renderizador Gratuito**: Ativo")
+    st.markdown("🟢 **Agente Cinematográfico**: Ativo")
+    st.markdown("🟢 **Gerador de Cenas IA**: Ativo (FLUX / Pollinations)")
+    st.markdown("🟢 **Animador Hugging Face**: Ativo (Wan 2.1 / LTX / 3D)")
+    if mj and mj.obter_ffmpeg():
+        st.markdown("🟢 **Montagem FFmpeg**: Ativo")
+    else:
+        st.markdown("🟡 **Montagem FFmpeg**: Fallback")
 
 # ------------------------------------------------------------------------------
-# TELA PRINCIPAL (Fluxo em 4 Passos sem numeração repetida)
+# TELA PRINCIPAL (Fluxo em 4 Passos Limpos)
 # ------------------------------------------------------------------------------
 st.markdown("# 🎬 AI VIDEO AGENT")
-st.markdown("Transforme imagens em vídeos cinematográficos de alto impacto para redes sociais, replicando automaticamente a linguagem visual do seu vídeo de referência.")
+st.markdown(
+    "Transforme imagens em vídeos multi-cenas para redes sociais. O Agente analisa sua referência, "
+    "cria novas cenas ilustradas no mesmo estilo via IA gratuita e anima as transições automaticamente."
+)
 
 if _ERRO_MJ:
-    st.warning(f"Aviso do motor de suporte: {_ERRO_MJ}")
+    st.error(f"Erro ao carregar motor_jornada.py: {_ERRO_MJ}")
 
-col_1, col_2 = st.columns(2)
+col_1, col_2 = st.columns(2, gap="large")
 
 with col_1:
     st.markdown("### ① Vídeo de Referência")
-    uploaded_video = st.file_uploader("Arraste ou selecione o vídeo de referência (ex: MysticMayhem style)", type=["mp4", "mov", "avi"])
+    uploaded_video = st.file_uploader(
+        "Arraste ou selecione o vídeo modelo (estilo MysticMayhem):",
+        type=["mp4", "mov", "avi", "webm"]
+    )
     if uploaded_video:
         st.video(uploaded_video)
     else:
-        st.info("Dica: Use um vídeo modelo com transições dinâmicas para orientar o agente.")
+        st.info("Envie o vídeo de referência para guiar o ritmo, os portais de luz e as transições do Agente.")
 
 with col_2:
-    st.markdown("### ② Imagem / Produto / Arte (Upload ou Drive)")
-    
-    metodo_upload = st.radio("Origem da Imagem:", ["📁 Upload do Computador (.tif, .tiff, .png, .jpg)", "📚 Biblioteca do Google Drive sincronizada"], horizontal=True)
-    
-    if "Upload" in metodo_upload:
-        uploaded_image = st.file_uploader("Selecione a imagem principal (.tif, .tiff, .png, .jpg)", type=["tif", "tiff", "png", "jpg", "jpeg", "webp"])
+    st.markdown("### ② Imagem / Produto / Arte")
+    origem_img = st.radio(
+        "Escolha a origem da imagem:",
+        ["📁 Upload do Computador (.tif, .tiff, .png, .jpg)", "📚 Biblioteca Sincronizada do Google Drive"],
+        horizontal=True
+    )
+
+    if "Upload" in origem_img:
+        uploaded_image = st.file_uploader(
+            "Selecione a imagem principal (.tif, .tiff, .png, .jpg, .webp):",
+            type=["tif", "tiff", "png", "jpg", "jpeg", "webp"]
+        )
         if uploaded_image:
             try:
-                img_carregada = Image.open(uploaded_image)
+                img_pil = Image.open(uploaded_image)
                 st.session_state.nome_arquivo = Path(uploaded_image.name).stem
                 buf = io.BytesIO()
-                img_carregada.convert("RGB").save(buf, format="PNG")
+                img_pil.convert("RGB").save(buf, format="PNG")
                 st.session_state.img_bytes = buf.getvalue()
-                st.image(img_carregada, caption=f"Imagem Carregada: {uploaded_image.name}", use_column_width=True)
             except Exception as e:
-                st.error(f"Erro ao ler imagem (TIF/PNG/JPG): {e}")
+                st.error(f"Não foi possível abrir a imagem: {e}")
     else:
-        if st.session_state.arquivos_drive:
-            opcoes_drive = {item["label"]: item for item in st.session_state.arquivos_drive}
-            escolha_drive = st.selectbox("Escolha um arquivo da base sincronizada do Drive:", list(opcoes_drive.keys()))
-            if escolha_drive:
-                item_sel = opcoes_drive[escolha_drive]
-                if st.button("📥 Baixar e Selecionar esta Imagem do Drive"):
-                    with st.spinner("Baixando arquivo do Drive..."):
-                        try:
-                            b_img = mj.baixar_bytes_carta_drive(item_sel["id"])
-                            st.session_state.img_bytes = b_img
-                            st.session_state.nome_arquivo = Path(item_sel["name"]).stem
-                            st.success("Imagem carregada com sucesso!")
-                        except Exception as e:
-                            st.error(f"Erro ao baixar do Drive: {e}")
+        imgs_drive = [x for x in st.session_state.arquivos_drive if x.get("tipo") == "imagem"]
+        if imgs_drive:
+            mapa_drive = {x["label"]: x for x in imgs_drive}
+            sel_label = st.selectbox("Selecione a imagem da base do Drive:", list(mapa_drive.keys()))
+            if sel_label and st.button("📥 Carregar Imagem Selecionada"):
+                with st.spinner("Baixando e convertendo arquivo do Drive..."):
+                    try:
+                        item = mapa_drive[sel_label]
+                        st.session_state.img_bytes = mj.baixar_bytes_carta_drive(item["id"])
+                        st.session_state.nome_arquivo = Path(item["name"]).stem
+                    except Exception as e:
+                        st.error(f"Erro ao baixar imagem do Drive: {e}")
         else:
-            st.info("Clique em '🔄 Sincronizar Biblioteca Visual' na barra lateral para carregar a biblioteca do Drive.")
+            st.info("Clique em '🔄 Sincronizar Biblioteca Visual' na barra lateral para listar as imagens do Drive.")
 
-    if st.session_state.img_bytes and "Upload" not in metodo_upload:
-        st.image(st.session_state.img_bytes, caption=f"Arquivo Selecionado: {st.session_state.nome_arquivo}", use_column_width=True)
+    if st.session_state.img_bytes:
+        st.image(
+            st.session_state.img_bytes,
+            caption=f"Imagem Base Pronta: {st.session_state.nome_arquivo}",
+            use_container_width=True
+        )
 
 st.markdown("---")
 
-# ③ Orientações com o Agente (Chat)
+# ③ Chat Inteligente com o Agente
 st.markdown("### ③ 💬 Orientações Adicionais com o Agente (Opcional)")
-st.markdown("Converse com o agente para refinar o tom, a iluminação ou os detalhes da animação antes da renderização.")
+st.markdown("Converse com o Agente para direcionar o clima, cores, efeitos ou ritmo das cenas geradas por IA.")
 
 if "messages" not in st.session_state:
     st.session_state.messages = [
-        {"role": "assistant", "content": "Olá! Estou pronto para analisar seu vídeo de referência e sua imagem. Deseja adicionar alguma orientação específica (ex: 'deixe o vídeo mais sombrio', 'atrase a entrada de partículas')?"}
+        {
+            "role": "assistant",
+            "content": "Olá! Vou compor 3 cenas inéditas a partir da sua imagem e conectá-las com portais de luz e vórtice espiral usando IA gratuita. Quer adicionar alguma orientação (ex: 'clima mais sombrio e místico', 'explosão de luz dourada no céu')?"
+        }
     ]
 
 for message in st.session_state.messages:
     with st.chat_message(message["role"]):
         st.markdown(message["content"])
 
-if prompt_user := st.chat_input("Digite sua orientação para o agente..."):
+if prompt_user := st.chat_input("Digite sua orientação para o Agente..."):
     st.session_state.messages.append({"role": "user", "content": prompt_user})
     with st.chat_message("user"):
         st.markdown(prompt_user)
-        
-    response_agent = f"Entendido! Vou aplicar sua diretriz ('{prompt_user}') mantendo a estrutura do vídeo de referência e preservando a estética original da sua imagem."
-    st.session_state.messages.append({"role": "assistant", "content": response_agent})
+
+    resposta = (
+        f"Combinado! Vou incorporar sua direção (**{prompt_user}**) nos prompts de geração de cenas "
+        "e na animação via Hugging Face / IA gratuita."
+    )
+    st.session_state.messages.append({"role": "assistant", "content": resposta})
     with st.chat_message("assistant"):
-        st.markdown(response_agent)
+        st.markdown(resposta)
 
 st.markdown("---")
 
-# ④ Geração Automática (Corrigida a numeração repetida)
-st.markdown("### ④ 🚀 Geração Automática")
+# ④ Geração Automática Multi-Cenas
+st.markdown("### ④ 🚀 Geração Automática Multi-Cenas")
 
-if st.button("✨ GERAR VÍDEO FINAL", type="primary"):
+if st.button("✨ GERAR VÍDEO COM IA GRATUITA", type="primary"):
     if not st.session_state.img_bytes:
-        st.error("Por favor, envie ou selecione uma imagem principal antes de iniciar a geração.")
+        st.error("Por favor, envie ou selecione uma imagem principal no Passo ② antes de gerar.")
+    elif mj is None:
+        st.error("O módulo motor_jornada.py não foi encontrado na pasta.")
     else:
-        with st.status("🧠 Executando Agente Inteligente...", expanded=True) as status:
-            st.write("🔍 Analisando referência cinematográfica...")
-            time.sleep(1.2)
-            st.write("🎨 Analisando elementos da imagem...")
-            time.sleep(1.2)
-            st.write("📝 Criando roteiro inteligente e estruturado...")
-            time.sleep(1.2)
-            st.write("🎞️ Selecionando efeitos e transições automáticas...")
-            time.sleep(1.2)
-            st.write("🎬 Renderizando vídeo final em modo gratuito...")
-            
-            output_mp4 = "video_final_gerado.mp4"
-            img_pil = Image.open(io.BytesIO(st.session_state.img_bytes))
-            
-            chat_orientations = " ".join([m["content"] for m in st.session_state.messages if m["role"] == "user"])
-            
-            if mj:
-                roteiro = mj.gerar_roteiro_inteligente(img_pil, chat_orientations, provedor_ia)
-                sucesso, video_path = mj.renderizar_video_local(img_pil, output_mp4)
-            else:
-                sucesso, video_path = True, output_mp4
-                img_pil.save("temp_img.jpg")
-                
-            status.update(label="✓ Vídeo concluído com sucesso!", state="complete", expanded=False)
-            
-        st.success("🎉 Seu vídeo está pronto para postagem nas redes sociais!")
-        if os.path.exists(output_mp4):
-            st.video(output_mp4)
-            with open(output_mp4, "rb") as file:
+        barra = st.progress(5)
+        status_box = st.status("🧠 Executando Pipeline Multi-Cenas (Hugging Face + IA Gratuita)...", expanded=True)
+
+        def atualizar_progresso(msg: str, pct: int):
+            barra.progress(min(100, max(0, pct)))
+            status_box.write(msg)
+
+        try:
+            img_pil = Image.open(io.BytesIO(st.session_state.img_bytes)).convert("RGB")
+            orientacoes = " | ".join([m["content"] for m in st.session_state.messages if m["role"] == "user"])
+            output_mp4 = f"Video_AI_{st.session_state.nome_arquivo}.mp4"
+
+            resultado = mj.executar_pipeline_ia_gratuita(
+                imagem_pil=img_pil,
+                orientacoes_chat=orientacoes,
+                hf_token=hf_token_input,
+                output_path=output_mp4,
+                callback_progresso=atualizar_progresso
+            )
+
+            barra.progress(100)
+            if resultado.get("ok") and os.path.exists(resultado["video_path"]):
+                status_box.update(label="✅ Vídeo Multi-Cenas concluído com sucesso!", state="complete", expanded=False)
+                st.success("🎉 Vídeo gerado com sucesso! Veja abaixo as cenas compostas pela IA e o vídeo final:")
+
+                # Mostra os Keyframes das 3 cenas geradas pela IA
+                kfs = resultado.get("keyframes", [])
+                cenas_info = resultado.get("cenas", [])
+                origens = resultado.get("origens_kf", [])
+                if kfs:
+                    with st.expander("🖼️ Cenas Compostas pelo Agente (Keyframes Gerados)", expanded=True):
+                        cols_kf = st.columns(len(kfs))
+                        for i, (ck, kf) in enumerate(zip(cols_kf, kfs)):
+                            tit = cenas_info[i].get("titulo", f"Cena {i+1}") if i < len(cenas_info) else f"Cena {i+1}"
+                            orig = origens[i] if i < len(origens) else ""
+                            ck.image(kf, caption=f"{tit}\n({orig})", use_container_width=True)
+
+                with st.expander("⚙️ Motores Utilizados em Cada Ato", expanded=False):
+                    for m_info in resultado.get("motores", []):
+                        st.write(f"• {m_info}")
+
+                video_bytes = Path(resultado["video_path"]).read_bytes()
+                st.video(video_bytes)
                 st.download_button(
-                    label="⬇️ Baixar Vídeo MP4",
-                    data=file,
-                    file_name="video_ia_gerado.mp4",
-                    mime="video/mp4"
+                    label="⬇️ BAIXAR VÍDEO PRONTO (.MP4)",
+                    data=video_bytes,
+                    file_name=output_mp4,
+                    mime="video/mp4",
+                    type="primary"
                 )
-        else:
-            st.warning("Renderização concluída. Verifique os arquivos na pasta de saída.")
+            else:
+                status_box.update(label="⚠️ Falha na montagem do vídeo", state="error")
+                st.error(f"Não foi possível concluir o vídeo: {resultado.get('erro', 'erro desconhecido')}")
+        except Exception as e:
+            status_box.update(label="❌ Erro durante a execução", state="error")
+            st.error(f"Ocorreu um erro inesperado: {e}")
