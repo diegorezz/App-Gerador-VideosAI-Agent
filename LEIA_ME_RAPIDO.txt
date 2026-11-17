@@ -1,0 +1,15 @@
+ORACULO v6 — DEPLOY EM 3 PASSOS
+================================
+
+1) Suba esta pasta inteira no GitHub (o app.py deve ficar na raiz do repo).
+
+2) No Streamlit Cloud (share.streamlit.io):
+   - Main file path: app.py
+   - Python version: 3.11
+
+3) (Opcional) Em Advanced settings > Secrets, cole o conteudo de
+   .streamlit/secrets.toml.example para listar as cartas do Drive.
+
+Pronto. Nenhuma chave de API e necessaria.
+
+ATENCAO: a pasta engine/ e obrigatoria. Sem ela o app quebra.
