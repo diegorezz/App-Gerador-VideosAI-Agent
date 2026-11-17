@@ -280,8 +280,8 @@ ELEMENTOS = {
              "nucleo": (1.00, 0.78, 0.32), "particula": (1.0, 0.55, 0.18)},
     "agua": {"base": (0.02, 0.10, 0.24), "meio": (0.10, 0.52, 0.72),
              "nucleo": (0.62, 0.92, 0.98), "particula": (0.55, 0.85, 1.0)},
-    "luz":  {"base": (0.30, 0.20, 0.02), "meio": (1.00, 0.78, 0.24),
-             "nucleo": (1.00, 0.97, 0.78), "particula": (1.0, 0.92, 0.62)},
+    "luz":  {"base": (0.26, 0.17, 0.02), "meio": (0.95, 0.68, 0.18),
+             "nucleo": (1.00, 0.93, 0.62), "particula": (1.0, 0.88, 0.55)},
     "terra": {"base": (0.12, 0.07, 0.02), "meio": (0.62, 0.40, 0.14),
               "nucleo": (0.95, 0.80, 0.50), "particula": (0.85, 0.68, 0.35)},
     "ar":   {"base": (0.10, 0.14, 0.18), "meio": (0.55, 0.72, 0.78),
@@ -339,18 +339,22 @@ class Elemento:
             perfil = smoothstep(topo, self.ancora, ynorm) ** 0.6
             limiar = 0.52 - 0.07 * a
         elif self.nome == "luz":
+            # halo dourado emergindo da base, com raios suaves — nao cobre o quadro
             d = self.r.fatia(self.r.corpo, -t * 60.0, 3)
             yy = np.linspace(0, 1, ch, dtype=np.float32)[:, None]
             xx = np.linspace(0, 1, cw, dtype=np.float32)[None, :]
-            rad = np.hypot(xx - 0.5, (yy - 0.5) * 0.8)
-            campo = 0.55 * d + 0.45 * (1.0 - np.clip(rad * 1.7, 0, 1))
-            perfil = smoothstep(0.05, 0.55, 1.0 - rad) ** 0.7
-            limiar = 0.46 - 0.10 * a
+            rad = np.hypot((xx - 0.5) * 0.85, (yy - self.ancora) * 1.25)
+            halo = np.clip(1.0 - rad * 1.35, 0, 1) ** 1.4
+            raios = 0.5 + 0.5 * np.sin(np.arctan2(yy - self.ancora, xx - 0.5) * 13.0 + t * 0.9)
+            campo = 0.45 * d + 0.55 * halo
+            perfil = (halo ** 0.85) * (0.72 + 0.28 * raios)
+            limiar = 0.58 - 0.06 * a
         elif self.nome == "terra":
-            campo = (0.55 * self.r.fatia(self.r.corpo, -t * 40.0, 13)
-                     + 0.45 * self.r.fatia(self.r.lento, -t * 25.0, 21))
-            perfil = smoothstep(0.10, self.ancora, ynorm) ** 0.8
-            limiar = 0.55 - 0.08 * a
+            campo = (0.45 * self.r.fatia(self.r.corpo, -t * 40.0, 13)
+                     + 0.35 * self.r.fatia(self.r.lento, -t * 25.0, 21)
+                     + 0.20 * self.r.fatia(self.r.fino, -t * 70.0, 5))
+            perfil = smoothstep(0.08, self.ancora, ynorm) ** 0.9
+            limiar = 0.62 - 0.07 * a
         else:  # ar
             campo = (0.5 * self.r.fatia(self.r.corpo, -t * 200.0, 7)
                      + 0.5 * self.r.fatia(self.r.fino, -t * 300.0, 19))
@@ -371,10 +375,12 @@ class Elemento:
         col = c0 + (c1 - c0) * k1
         col = col + (c2 - col) * k2 * 0.85
 
-        al = np.clip(w * 2.3, 0, 1)[..., None]
+        teto = 0.82 if self.nome == "luz" else 1.0
+        al = np.clip(w * 2.3, 0, 1)[..., None] * teto
         out = rgb * (1 - al) + col * al
         brilho = gaussian_filter(np.clip(w, 0, 1), 18)[..., None]
-        out = out + brilho * c1 * (0.45 + 0.25 * a)
+        ganho = 0.32 if self.nome == "luz" else 0.45
+        out = out + brilho * c1 * (ganho + 0.22 * a)
         return np.clip(out, 0, 1.9)
 
 
@@ -675,7 +681,7 @@ class MotorV6:
             yy = np.linspace(0, 1, self.card_h, dtype=np.float32)[:, None]
             xx = np.linspace(0, 1, self.card_w, dtype=np.float32)[None, :]
             r = np.hypot((xx - 0.5) * 0.62, (yy - 0.86))
-            g = np.exp(-(r / 0.62) ** 2 * 2.6) * c["brilho"]
+            g = np.exp(-(r / 0.62) ** 2 * 2.6) * c["brilho"] * (0.45 if self.elem.nome == "luz" else 1.0)
             rgb = rgb + g[..., None] * GOLD * 0.42
 
         rgb = self.elem.aplicar(rgb, t, c["elemento"])

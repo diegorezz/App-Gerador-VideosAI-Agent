@@ -1,15 +1,19 @@
 ORACULO v6 — DEPLOY EM 3 PASSOS
 ================================
 
-1) Suba esta pasta inteira no GitHub (o app.py deve ficar na raiz do repo).
+1) Suba esta pasta inteira no GitHub (o app.py na raiz do repo).
 
 2) No Streamlit Cloud (share.streamlit.io):
    - Main file path: app.py
    - Python version: 3.11
 
-3) (Opcional) Em Advanced settings > Secrets, cole o conteudo de
-   .streamlit/secrets.toml.example para listar as cartas do Drive.
+3) Pronto. Os 22 IDs do Drive ja vem embutidos em engine/arcanos.py.
+   Secrets e OPCIONAL (use so para sobrescrever algum ID).
 
-Pronto. Nenhuma chave de API e necessaria.
+Nenhuma chave de API e necessaria.
 
-ATENCAO: a pasta engine/ e obrigatoria. Sem ela o app quebra.
+ATENCAO
+- A pasta engine/ e obrigatoria. Sem ela o app quebra.
+- A pasta dos arcanos no Drive precisa estar como "qualquer pessoa com o link".
+- O plano gratuito do Cloud tem limite de execucao: para gerar os 22 em
+  720x1280, rode localmente com:  python -m engine.lote --todos --res 720x1280

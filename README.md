@@ -1,6 +1,6 @@
 # 🎴 ORÁCULO · Gerador de Vídeos v6
 
-App Streamlit que gera vídeos de **20 segundos, 9:16, com áudio**, a partir dos 22 arcanos maiores.
+App Streamlit que gera vídeos de **20 segundos, 9:16, com áudio**, a partir dos **22 arcanos maiores**.
 Motor próprio: **custo zero por vídeo**, sem chave de API, sem fila de GPU.
 
 ---
@@ -25,22 +25,32 @@ determinístico, gratuito e reproduzível nos 22 arcanos.
 
 ## Como usar
 
-1. Envie a imagem do arcano (`.png`, `.jpg`, `.tif`).
-2. Clique em **Analisar arcano** — o motor lê geometria, paleta, profundidade e o rosto.
-3. Clique em **GERAR VÍDEO**.
+### Modo 1 · Um arcano
+1. Escolha **Enviar do computador** ou **Escolher do catálogo** (os 22 já vêm com ID do Drive).
+2. Clique em **Analisar arcano**.
+3. Escolha a resolução e clique em **GERAR VÍDEO**.
 
-O agente decide sozinho o efeito elemental (fogo / água / luz / terra / ar) a partir da
-paleta da carta, o foco da câmera, o ritmo e a trilha. Você não escolhe motor nem efeito.
+### Modo 2 · Lote dos 22
+1. Aba **⚡ Lote dos 22**.
+2. Marque os arcanos (ou use *Selecionar todos*).
+3. Clique em **GERAR N VÍDEO(S)**.
+4. Ao final, baixe tudo em um **único .zip**.
 
-**Tempo de geração:** ~2 min a 540×960 · ~5 min a 720×1280 (Streamlit Cloud, 1 vCPU)
+O agente decide o efeito elemental pela correspondência hermética do arcano:
+
+| Elemento | Arcanos |
+|---|---|
+| **fogo** | I Bateleur · IV Empereur · X Roue · XI Force · XIV Temperance · XVI Maison Dieu · XX Jugement |
+| **água** | II Papesse · VII Chariot · XII Pendu · XIII Arcane sans Nom · XVIII Lune |
+| **luz** | XIX Soleil |
+| **terra** | III Imperatrice · V Pape · IX Ermite · XV Diable · XXI Monde |
+| **ar** | 0 Mat · VI Amoureux · VIII Justice · XVII Etoile |
 
 ---
 
 ## Deploy no Streamlit Cloud
 
-### 1. Suba os arquivos no GitHub
-
-A estrutura precisa ser exatamente esta:
+### 1. Estrutura do repositório
 
 ```
 seu-repo/
@@ -50,46 +60,31 @@ seu-repo/
 ├── README.md
 ├── .streamlit/
 │   └── config.toml
+├── exemplos/
+│   └── exemplo_le_bateleur_20s.mp4
 └── engine/
     ├── __init__.py
     ├── analisar_carta.py
+    ├── arcanos.py            ← catálogo: número, nome, elemento, ID do Drive
     ├── audio.py
+    ├── lote.py               ← gerador em lote
     └── v6.py
 ```
 
-> **Atenção:** a pasta `engine/` é obrigatória. Sem ela o app quebra na primeira linha de import.
+> **Atenção:** a pasta `engine/` é obrigatória. Sem ela o app quebra no primeiro import.
 
-### 2. Aponte o Streamlit Cloud para o repo
+### 2. Configuração
 
 Em [share.streamlit.io](https://share.streamlit.io/):
 - **Main file path:** `app.py`
 - **Python version:** `3.11`
-- **Advanced settings → Secrets:** cole o conteúdo de `.streamlit/secrets.toml.example`
 
-### 3. (Opcional) Listar as cartas do Drive
+Os 22 IDs do Drive **já vêm embutidos** em `engine/arcanos.py`. Secrets é opcional.
 
-No arquivo de Secrets, adicione:
+### 3. Compartilhamento do Drive
 
-```toml
-ARCANOS_JSON = '{
-  "LE MAT": "1u056VmsEiw2jw3rWX9vTDNh_HRAMhocS",
-  "LE BATELEUR": "1mvX-9sjpCiJ7tulHwH7UylhUZdo0hLAz",
-  "LA PAPESSE": "13-owBCg6HVWPp9DTKPKoiOwt3goLDAdm",
-  "L IMPERATRICE": "1Zbs1ATYnUlN81dxfSkHbfs0hfio7jy-S",
-  "L EMPEREUR": "1H3JWYic-9QxHv1MpiICuzYq9uxy7of7b",
-  "LE PAPE": "1WZk-n207dj3VoRBsHyfc1NzoYbpBGSRd",
-  "L AMOUREUX": "1z02eKNerM9q6CeuZ6LuEce3RBcidFHZg",
-  "LE CHARIOT": "1nVaJihwHMBabQakgsDbwZ9zjGIiJ7Jof",
-  "LA JUSTICE": "1vSwJbqlabrMXixIss7qw959691_HB42R",
-  "LE PENDU": "1-9oSxIbsweV9WHlc7ZO6HnFVJv1dQovt",
-  "LA MORT": "1n2OZNnQzrSAfHiJXiKnczgotbtEKqz5o",
-  "TEMPERANCE": "1sII92SbIqdIKUrqO3MhsTnozGVdoZ6jH",
-  "LE DIABLE": "1R3I2xmnWrOWWNur4yI-00P5b6guUWURS",
-  "LA TOUR": "1xbtm7y1NFwopp99rT8TcDQI5sYS3-E_9"
-}'
-```
-
-As cartas do Drive precisam estar compartilhadas como "qualquer pessoa com o link".
+A pasta dos arcanos precisa estar como **"qualquer pessoa com o link"**. Sem isso o
+download falha (o app avisa quando recebe menos de 20 KB).
 
 ---
 
@@ -97,12 +92,13 @@ As cartas do Drive precisam estar compartilhadas como "qualquer pessoa com o lin
 
 ```
 engine/analisar_carta.py     ← lê a carta, sem coordenada fixa
-        │
         ├── geometria (bbox, linha do rótulo, piso)
         ├── paleta dominante (k-means, 8 cores)
         ├── mapa de profundidade (saturação + tinta + posição + saliência)
         ├── rosto (máscara de pele + validação geométrica do blob)
-        └── elemento narrativo (decidido pela paleta)
+        └── elemento narrativo (fallback quando não há catálogo)
+
+engine/arcanos.py            ← catálogo hermético dos 22 + IDs do Drive
 
 engine/v6.py                 ← a cena
         ├── Ruido              bancos fbm animados
@@ -114,6 +110,7 @@ engine/v6.py                 ← a cena
         └── MotorV6            render_frame / render_video
 
 engine/audio.py              ← trilha sintetizada, casada com os tempos
+engine/lote.py               ← orquestra download → análise → render → áudio → MP4
 ```
 
 ### Timeline dos 20s
@@ -135,21 +132,42 @@ Edite a dataclass `Roteiro` em `engine/v6.py`. Todos os tempos e zooms estão no
 
 ---
 
+## Rodar localmente (recomendado para gerar os 22 em qualidade final)
+
+O plano gratuito do Streamlit Cloud tem 1 vCPU e **limite de execução**. Para os 22 em
+720×1280, rode na sua máquina:
+
+```bash
+pip install -r requirements.txt
+
+# os 22 em qualidade final
+python -m engine.lote --todos --res 720x1280 --saida ./videos
+
+# apenas alguns
+python -m engine.lote --numeros 0 1 16 --res 540x960
+
+# a partir de uma pasta local (evita download)
+python -m engine.lote --todos --arquivo ./arcanos_tif --res 720x1280
+```
+
+Saída por arcano: `NN_nome_20s.mp4`, `NN_nome_trilha.wav` e `NN_nome.json` (metadados).
+
+---
+
 ## Validado
 
-O motor foi validado na **carta mais difícil da coleção** — Le Bateleur (mesa, objetos,
-figura deslocada). Se funciona nela, funciona nas 22.
+O motor foi validado em **três cartas estruturalmente diferentes**:
 
-Análise automática nas 4 primeiras cartas:
+| Arcano | Elemento | Estrutura | Resultado |
+|---|---|---|---|
+| I · Le Bateleur | fogo | mesa + objetos + figura deslocada | ✅ |
+| XIX · Le Soleil | luz | duas figuras + sol grande no topo | ✅ |
+| XXI · Le Monde | terra | figura central em coroa de louros | ✅ |
 
-| Arcano | Rosto | Elemento |
-|---|---|---|
-| I · LE BATELEUR | (0,45 · 0,20) ✓ | fogo |
-| II · LA PAPESSE | (0,52 · 0,22) ✓ | fogo |
-| III · L'IMPERATRICE | (0,53 · 0,27) ✓ | fogo |
-| VIII · LA JUSTICE | (0,50 · 0,21) ✓ | fogo |
+O caso do Le Bateleur é o mais difícil da coleção (mesa, copos, dados e punhal atravessando
+o quadro). Se funciona nele, funciona nas 22.
 
-Veja `exemplos/exemplo_le_bateleur_20s.mp4` para o resultado da validação.
+Veja `exemplos/exemplo_le_bateleur_20s.mp4`.
 
 ---
 
@@ -162,33 +180,32 @@ Veja `exemplos/exemplo_le_bateleur_20s.mp4` para o resultado da validação.
 | 22 vídeos | **R$ 0** |
 | API de IA generativa | **nenhuma** |
 
-O plano gratuito do Streamlit Cloud tem 1 GB de RAM. Um render de 20s em 540×960
-usa ~500 MB, com folga. Para 720×1280, prefira uma máquina com 2 GB.
-
 ---
 
 ## Problemas conhecidos
 
 **`ImportError: Numba needs NumPy 2.4 or less`**
-O `requirements.txt` já fixa `numpy<2.5`. Se persistir, limpe o cache do Cloud
-(*Manage app → Reboot*).
+O `requirements.txt` fixa `numpy<2.5`. Se persistir: *Manage app → Reboot*.
 
-**Render muito lento**
-Reduza `W`/`H` em `app.py` na chamada `MotorV6(card, depth, perfil, W=540, H=960, ...)`.
-360×640 gera em ~1 min com qualidade de rascunho.
+**Render muito lento ou app reinicia no lote**
+Limite do Streamlit Cloud. Use 360×640 no lote pela web, ou rode localmente.
+
+**`ffmpeg not found`**
+Confirme que `packages.txt` foi enviado — o Cloud instala via apt.
 
 **Rosto não detectado em alguma carta**
 O analisador cai automaticamente para o centro de saliência. O vídeo continua correto,
 só o push-in mira outro ponto.
 
-**`ffmpeg not found`**
-Confirme que `packages.txt` foi enviado — o Streamlit Cloud instala via apt.
+**Download do Drive falha**
+A pasta precisa estar pública com link. Verifique em `engine/arcanos.py` se o ID confere.
 
 ---
 
 ## Próximos passos sugeridos
 
-1. **Lote dos 22** — script que lê todos os IDs do Drive e gera em sequência.
-2. **Profundidade real** — trocar o mapa heurístico por `Depth Anything V2` (Small roda em CPU).
-3. **Segmentação de figura** — `rembg` para separar personagem do fundo e ganhar oclusão real.
-4. **Camada generativa opcional** — Kling 2.6 Pro (~US$ 0,47/clipe) para 1 clipe de virada por vídeo.
+1. **Profundidade real** — trocar o mapa heurístico por `Depth Anything V2` (Small roda em CPU,
+   +400 MB no deploy).
+2. **Segmentação de figura** — `rembg` para separar personagem do fundo e ganhar oclusão real.
+3. **Camada generativa opcional** — Kling 2.6 Pro (~US$ 0,47/clipe) para 1 clipe de virada por vídeo.
+4. **Música adaptativa** — hoje a trilha é sintetizada por elemento; poderia usar biblioteca de samples.
